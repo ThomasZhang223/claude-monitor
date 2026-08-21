@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Publish what this session is doing, so the dashboard shows real work rather
+# than a branch name.
+#
+# Called by Claude itself: the context packet instructs it to run this after each
+# meaningful step. Written to two places, because they answer two questions:
+#
+#   @cc_recap on the tmux session   the one-line headline the session's ROW shows.
+#                                   Dies with the session, so it cannot go stale.
+#   recap/<session>.txt             headline plus detail, which is what the
+#                                   PREVIEW shows. A tmux option cannot hold it:
+#                                   newlines are the record separator of the
+#                                   batched list-sessions read the dashboard uses.
+#
+# Usage:
+#   cc-recap 'headline'
+#   cc-recap 'headline' 'detail line' 'another detail line'
+#   printf 'detail\nlines\n' | cc-recap 'headline'
+set -uo pipefail
+
+if [ $# -lt 1 ] || [ -z "${1:-}" ]; then
+	echo "usage: cc-recap '<headline>' ['<detail line>' ...]" >&2
+	exit 2
+fi
+
+if [ -z "${TMUX:-}" ]; then
+	echo "cc-recap: not inside tmux, nothing to publish to" >&2
+	exit 1
+fi
+
+# $TMUX_PANE identifies this pane, from which tmux resolves the session name.
+session=$(tmux display-message -p -t "${TMUX_PANE}" '#{session_name}' 2>/dev/null)
+if [ -z "$session" ]; then
+	echo "cc-recap: could not resolve the tmux session for this pane" >&2
+	exit 1
+fi
+
+# Collapse whitespace in the headline: tabs and newlines are the field and record
+# separators in the batched `list-sessions -F` read, and would corrupt it.
+headline=$(printf '%s' "$1" | tr '\t\r\n' '   ' | cut -c1-200)
+shift
+
+recap_dir="${HOME}/.local/share/claude-monitor/recap"
+mkdir -p "$recap_dir" 2>/dev/null
+
+# Line 1 is the stamp, line 2 the headline, the rest is detail. Seconds-resolution
+# is plenty: this is only ever compared against the session's creation time and
+# rendered as an age. `date +%3N` is GNU-only and this runs on macOS.
+{
+	printf '%s000\n' "$(date +%s)"
+	printf '%s\n' "$headline"
+	for line in "$@"; do
+		printf '%s\n' "$line"
+	done
+	# Detail may also arrive on stdin, so a heredoc works. Skipped when stdin is a
+	# terminal, or this would block waiting for input that is never coming.
+	if [ ! -t 0 ]; then
+		cat
+	fi
+} >"${recap_dir}/${session}.txt" 2>/dev/null
+
+tmux set-option -t "$session" @cc_recap "$headline"

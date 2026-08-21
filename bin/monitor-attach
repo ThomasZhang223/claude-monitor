@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Attach to (or raise) one session's Terminal window, outside the dashboard.
+#
+# The target for a notification's Attach button, via `terminal-notifier -execute`.
+# Shares `openInNewTerminal` with the dashboard's own Enter key rather than
+# reimplementing the raise-or-open logic here.
+#
+# Usage:  monitor-attach <tmux-session-name>
+set -euo pipefail
+
+# A notification click does NOT run this from a login shell. terminal-notifier
+# is relaunched by Notification Center to handle the click, so the command it
+# runs inherits launchd's PATH — /usr/bin:/bin:/usr/sbin:/sbin — where neither
+# `npx` nor `tmux` exists. The failure is silent, because -execute's output goes
+# nowhere a person will ever look: clicking the notification simply did nothing.
+# Both Homebrew prefixes are prepended (arm64 and Intel) rather than resolving a
+# single absolute path, so this keeps working on either machine.
+export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH:-/usr/bin:/bin:/usr/sbin:/sbin}"
+
+# Resolve through symlinks — this script is symlinked into ~/.local/bin, and the
+# repo it launches into lives next to the real file, not next to the link.
+src="${BASH_SOURCE[0]}"
+while [ -L "$src" ]; do
+	dir=$(cd -P "$(dirname "$src")" && pwd)
+	src=$(readlink "$src")
+	[[ "$src" != /* ]] && src="$dir/$src"
+done
+root=$(cd -P "$(dirname "$src")/.." && pwd)
+
+# core/ and tui/ are separate packages, each with their own node_modules — this
+# entrypoint's logic lives in core/, so that is what gets cd'd into, not tui/.
+cd "$root/core"
+
+if [ ! -d node_modules ] ||
+	[ ! -f node_modules/.package-lock.json ] ||
+	[ package-lock.json -nt node_modules/.package-lock.json ]; then
+	echo "Installing claude-monitor-core dependencies..." >&2
+	npm ci --silent
+fi
+
+exec npx tsx src/cli-attach.ts "$@"

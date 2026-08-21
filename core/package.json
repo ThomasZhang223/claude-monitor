@@ -1,0 +1,14 @@
+{
+  "name": "claude-monitor-core",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --import tsx --test test/*.test.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.16.0"
+  }
+}

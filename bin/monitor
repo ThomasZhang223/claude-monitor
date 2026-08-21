@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Launch the Claude session dashboard.
+#
+# One word from any directory: shows every live Claude Code session grouped into
+# per-repo boxes, with a global usage header and a preview of whatever is waiting
+# on you. Sessions are tmux sessions, so they outlive both this dashboard and the
+# terminal that started it.
+#
+# Usage:  monitor [--dev]
+set -euo pipefail
+
+# Resolve through symlinks — this script is symlinked into ~/.local/bin, and the
+# app it launches lives next to the real file, not next to the link.
+src="${BASH_SOURCE[0]}"
+while [ -L "$src" ]; do
+	dir=$(cd -P "$(dirname "$src")" && pwd)
+	src=$(readlink "$src")
+	[[ "$src" != /* ]] && src="$dir/$src"
+done
+root=$(cd -P "$(dirname "$src")/.." && pwd)
+
+cd "$root/tui"
+
+# Install when missing, or refresh when node_modules has drifted from the
+# committed lockfile. `npm ci` installs exactly what package-lock.json pins,
+# which cures a stale tree — notably an ink@6 that pulls a leaky terminal-size
+# (an unclosed /dev/tty handle per render) and eventually OOMs the TUI.
+# node_modules/.package-lock.json is npm's post-install marker.
+if [ ! -d node_modules ] ||
+	[ ! -f node_modules/.package-lock.json ] ||
+	[ package-lock.json -nt node_modules/.package-lock.json ]; then
+	echo "Installing monitor dependencies..."
+	npm ci --silent
+fi
+
+if [ "${1:-}" = "--dev" ]; then
+	shift
+	exec npx tsx --watch monitor.tsx "$@"
+fi
+exec npx tsx monitor.tsx "$@"

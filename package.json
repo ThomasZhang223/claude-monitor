@@ -1,0 +1,18 @@
+{
+  "name": "claude-monitor",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "npm --prefix core test",
+    "typecheck": "cd core && npx tsc --noEmit && cd ../tui && npx tsc --noEmit",
+    "smoke": "tsx smoke/e2e.mts",
+    "smoke:status": "tsx smoke/status.mts",
+    "start": "bin/monitor"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
+  }
+}
