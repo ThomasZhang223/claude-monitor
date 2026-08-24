@@ -15,6 +15,10 @@ import {
   parseWorktreeList,
   worktreeAddCommand,
   worktreePathFor,
+  worktreeRootProblem,
+  worktreeRootWritable,
+  defaultWorktreeRoot,
+  type DirProbe,
 } from "../src/repos.ts";
 import type { Exec, ExecResult } from "../src/exec.ts";
 import { ALPHA, GENERAL } from "./fixtures/boxes.ts";
@@ -234,4 +238,92 @@ test("worktreeAddCommand: creates the root before git needs it", () => {
   // on nothing worse than an absent folder.
   const cmd = worktreeAddCommand("/repo", "cc/x", "/home/me/worktrees/repos_x");
   assert.match(cmd, /^mkdir -p '\/home\/me\/worktrees' && git -C/);
+});
+
+// ---------------------------------------------------------------------------
+// Worktree root
+// ---------------------------------------------------------------------------
+
+test("worktreeRootProblem: a sibling collection directory is fine", () => {
+  assert.equal(worktreeRootProblem("/home/me/worktrees", "/home/me/repos/app"), null);
+});
+
+test("worktreeRootProblem: relative paths are refused", () => {
+  // A relative root would resolve against whatever the dashboard's working
+  // directory happened to be, which is not a thing the config author controls.
+  assert.match(worktreeRootProblem("worktrees", "/home/me/app") ?? "", /absolute/);
+});
+
+test("worktreeRootProblem: the filesystem root is not a worktree root", () => {
+  assert.match(worktreeRootProblem("/", "/home/me/app") ?? "", /filesystem root/);
+});
+
+test("worktreeRootProblem: the box's own folder is refused", () => {
+  assert.match(worktreeRootProblem("/home/me/app", "/home/me/app") ?? "", /own folder/);
+});
+
+test("worktreeRootProblem: a root inside the repo is refused", () => {
+  // git accepts a worktree target under the checkout, and the result is a repo
+  // containing copies of itself which git then reports as untracked.
+  assert.match(worktreeRootProblem("/home/me/app/wt", "/home/me/app") ?? "", /inside/);
+});
+
+test("worktreeRootProblem: a sibling whose name merely starts the same is fine", () => {
+  // String-prefix containment would call /home/me/app-worktrees "inside"
+  // /home/me/app. Path segments are what matter, not characters.
+  assert.equal(worktreeRootProblem("/home/me/app-worktrees", "/home/me/app"), null);
+});
+
+/** A probe over a fixed map: anything unlisted is missing. */
+const probeOf = (states: Record<string, "writable" | "blocked">): DirProbe =>
+  (dir) => states[dir] ?? "missing";
+
+test("worktreeRootWritable: a root that does not exist yet rides on its nearest ancestor", () => {
+  // It is created on first use, so requiring it up front would fail the very
+  // first session in a new box.
+  const probe = probeOf({ "/home/me": "writable" });
+  assert.equal(worktreeRootWritable("/home/me/worktrees/deep", probe), true);
+});
+
+test("worktreeRootWritable: a blocked ancestor stops the walk, it is not climbed past", () => {
+  // The bug this guards: /home/me is writable, so a walk that treats "blocked"
+  // and "missing" alike would climb straight past the read-only directory and
+  // call the root fine, and mkdir -p would then fail on first use.
+  const probe = probeOf({ "/home/me/ro": "blocked", "/home/me": "writable" });
+  assert.equal(worktreeRootWritable("/home/me/ro/wt", probe), false);
+});
+
+test("worktreeRootWritable: nothing writable all the way up is false, not a hang", () => {
+  assert.equal(worktreeRootWritable("/a/b/c", probeOf({})), false);
+});
+
+test("defaultWorktreeRoot: the box folder's own parent, which is where they already go", () => {
+  const probe = probeOf({ "/home/me/repos": "writable" });
+  assert.equal(defaultWorktreeRoot("/home/me/repos/app", probe), "/home/me/repos");
+});
+
+test("defaultWorktreeRoot: null for a box with no folder", () => {
+  assert.equal(defaultWorktreeRoot(null, probeOf({})), null);
+});
+
+test("defaultWorktreeRoot: null when the parent refuses writes", () => {
+  // A dotfiles repo checked out at ~ has /Users (or /home) as its parent, and
+  // that is root-owned. Offering it would prefill a path the first session
+  // fails on, so the panel offers nothing and says why instead.
+  const probe = probeOf({ "/Users": "blocked" });
+  assert.equal(defaultWorktreeRoot("/Users/me", probe), null);
+});
+
+test("defaultWorktreeRoot: null for a repo at the filesystem root", () => {
+  assert.equal(defaultWorktreeRoot("/", probeOf({ "/": "writable" })), null);
+});
+
+test("defaultWorktreeRoot: what it returns is always a root worktreePathFor accepts", () => {
+  // The prefill and the placement have to agree, or the panel would offer a
+  // value that changes where worktrees go the moment it is saved.
+  const probe = probeOf({ "/home/me/repos": "writable" });
+  const boxPath = "/home/me/repos/app";
+  const root = defaultWorktreeRoot(boxPath, probe);
+  const box = { ...ALPHA, path: boxPath, worktreeRoot: null };
+  assert.equal(worktreePathFor(box, "x"), worktreePathFor({ ...box, worktreeRoot: root }, "x"));
 });

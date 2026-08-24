@@ -14,6 +14,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import { MODE_ORDER, SESSION_PREFIX, type BoxDef } from "./model.ts";
+import { worktreeRootProblem } from "./repos.ts";
 
 const REPO_ROOT = path.resolve(fileURLToPath(import.meta.url), "../../..");
 
@@ -110,14 +111,18 @@ export function validateConfig(raw: unknown): Config {
     // A collection directory for this box's worktrees. Unlike `path` it is NOT
     // required to exist — it is created on first use — so this validates the
     // shape only, and rejects setting one on a box with no folder at all,
-    // where nothing would ever be created under it.
+    // where nothing would ever be created under it. The remaining rules come
+    // from `worktreeRootProblem`, which the setup panel's live field also uses,
+    // so the panel can never show a value as fine that the save then rejects.
     let worktreeRoot: string | null = null;
     if (b.worktreeRoot !== undefined && b.worktreeRoot !== null) {
-      if (typeof b.worktreeRoot !== "string" || !path.isAbsolute(b.worktreeRoot)) {
+      if (typeof b.worktreeRoot !== "string") {
         fail(`boxes[${i}].worktreeRoot`, "must be null or an absolute path");
       }
       if (!boxPath) fail(`boxes[${i}].worktreeRoot`, "needs a path - this box has no folder");
-      worktreeRoot = b.worktreeRoot;
+      const problem = worktreeRootProblem(b.worktreeRoot as string, boxPath as string);
+      if (problem) fail(`boxes[${i}].worktreeRoot`, problem);
+      worktreeRoot = b.worktreeRoot as string;
     }
 
     return { id: b.id, label: b.label, color: b.color, path: boxPath, worktreeRoot };

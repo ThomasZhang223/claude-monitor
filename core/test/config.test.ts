@@ -180,7 +180,7 @@ test("validateConfig: worktreeRoot must be absolute", () => {
   const cfg = validConfig({
     boxes: [{ id: "a", label: "A", color: "#7FFFD4", path: os.tmpdir(), worktreeRoot: "worktrees" }],
   });
-  assert.throws(() => validateConfig(cfg), /worktreeRoot must be null or an absolute path/);
+  assert.throws(() => validateConfig(cfg), /worktreeRoot must be an absolute path/);
 });
 
 test("validateConfig: worktreeRoot needs a folder to be a root FOR", () => {
@@ -201,4 +201,22 @@ test("validateConfig: worktreeRoot need not exist yet", () => {
     ],
   });
   assert.equal(validateConfig(cfg).boxes[0].worktreeRoot, "/nonexistent/wt");
+});
+
+test("validateConfig: worktreeRoot cannot sit inside the box's own repo", () => {
+  // Shares `worktreeRootProblem` with the setup panel's live field, so the
+  // panel can never show a value as fine that the save then rejects.
+  const cfg = validConfig({
+    boxes: [
+      { id: "a", label: "A", color: "#7FFFD4", path: os.tmpdir(), worktreeRoot: path.join(os.tmpdir(), "wt") },
+    ],
+  });
+  assert.throws(() => validateConfig(cfg), /inside the box's own repo/);
+});
+
+test("validateConfig: worktreeRoot cannot be the filesystem root", () => {
+  const cfg = validConfig({
+    boxes: [{ id: "a", label: "A", color: "#7FFFD4", path: os.tmpdir(), worktreeRoot: "/" }],
+  });
+  assert.throws(() => validateConfig(cfg), /filesystem root/);
 });

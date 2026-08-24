@@ -80,7 +80,15 @@ import {
   planNotifications,
   type NotifyStateMap,
 } from "../core/src/notify.ts";
-import { currentBranch, isGitCapable, isGitRepo, worktreePathFor } from "../core/src/repos.ts";
+import {
+  currentBranch,
+  defaultWorktreeRoot,
+  isGitCapable,
+  isGitRepo,
+  worktreePathFor,
+  worktreeRootProblem,
+  worktreeRootWritable,
+} from "../core/src/repos.ts";
 import { append as appendHistory, recapChanged } from "../core/src/history.ts";
 import * as fsSync from "fs";
 import * as os from "os";
@@ -990,7 +998,7 @@ function Wizard({
 // required to advance, Enter takes the current value, Escape backs out.
 // ---------------------------------------------------------------------------
 
-type SetupStep = "list" | "path" | "name" | "color";
+type SetupStep = "list" | "path" | "wtroot" | "name" | "color";
 
 /** Rows each step needs — see wizardRows's header for why this is declared
  *  rather than measured. */
@@ -1001,8 +1009,9 @@ export function setupRows(step: SetupStep): number {
   // color: border 2, title, blank, grid label, PALETTE_ROWS rows, selected
   //        name line, blank, keys = 15.
   if (step === "color") return 2 + 1 + 1 + 1 + PALETTE_ROWS + 1 + 1 + 1;
-  // path / name: border 2, title, blank, field, blank, status/error line,
-  //              blank, keys = 9.
+  // path / wtroot / name: border 2, title, blank, field, blank, status/error
+  //                       line, blank, keys = 9. The three are one shape, so
+  //                       adding the worktree root cost no height.
   return 9;
 }
 
@@ -1028,6 +1037,23 @@ function pathStatusText(raw: string): string {
   }
   if (!isDir) return "not found";
   return isGitRepo(resolved) ? "git repo · worktree features on" : "plain folder · no worktree";
+}
+
+/** Live validation text for the worktree-root step, and whether Enter may
+ *  advance. Two grades on purpose: a structural problem is what `validateConfig`
+ *  rejects at save time, so it must block here too; an unwritable directory is a
+ *  fact about this machine right now — the directory is created on first use and
+ *  permissions change — so it warns and lets the save through. */
+function wtrootStatus(raw: string, boxPath: string): { text: string; blocked: boolean; warn: boolean } {
+  const trimmed = raw.trim();
+  if (trimmed === "") return { text: "empty: worktrees go beside the box folder", blocked: false, warn: false };
+  const resolved = expandTilde(trimmed);
+  const problem = worktreeRootProblem(resolved, boxPath);
+  if (problem) return { text: problem, blocked: true, warn: false };
+  if (!worktreeRootWritable(resolved)) {
+    return { text: `${resolved} cannot be written to - worktrees would fail here`, blocked: false, warn: true };
+  }
+  return { text: `worktrees collect in ${resolved}`, blocked: false, warn: false };
 }
 
 function pathIsValid(raw: string): boolean {
@@ -1068,6 +1094,7 @@ function SetupPanel({
   const [cursor, setCursor] = useState(0);
   const [editIdx, setEditIdx] = useState<number | null>(null);
   const [pathValue, setPathValue] = useState("");
+  const [wtrootValue, setWtrootValue] = useState("");
   const [nameValue, setNameValue] = useState("");
   const [colorIdx, setColorIdx] = useState(0);
   const [prefixEdit, setPrefixEdit] = useState<string | null>(null);
@@ -1079,6 +1106,7 @@ function SetupPanel({
   const startAdd = () => {
     setEditIdx(null);
     setPathValue("");
+    setWtrootValue("");
     setNameValue("");
     const defaultColor = firstUnusedColor(config.boxes);
     setColorIdx(Math.max(0, PALETTE.findIndex((c) => c.hex === defaultColor)));
@@ -1090,11 +1118,21 @@ function SetupPanel({
     const b = config.boxes[i];
     setEditIdx(i);
     setPathValue(b.path ?? "");
+    // Show where this box's worktrees actually go today, which for a box that
+    // has set nothing is the folder's own parent. Prefilling the live answer
+    // rather than an empty field is what makes the step readable as "here is
+    // the current placement, change it if you want".
+    setWtrootValue(b.worktreeRoot ?? defaultWorktreeRoot(b.path) ?? "");
     setNameValue(b.label);
     setColorIdx(Math.max(0, PALETTE.findIndex((c) => c.hex === b.color)));
     setError(null);
     setStep("path");
   };
+
+  // Graded against the path being typed, not against the saved box: on an add
+  // there is no saved box yet, and on an edit the path may have just changed.
+  const wtroot = wtrootStatus(wtrootValue, pathValue.trim() ? expandTilde(pathValue.trim()) : "");
+  const wtrootBlocked = wtroot.blocked;
 
   const idPreview = isAdd ? sanitizeBoxId(nameValue) : config.boxes[editIdx ?? 0]?.id ?? "";
   const nameIsValid = isAdd
@@ -1102,15 +1140,19 @@ function SetupPanel({
     : nameValue.trim() !== "";
 
   const commitBox = () => {
+    const boxPath = pathValue.trim() ? expandTilde(pathValue.trim()) : null;
+    const wtroot = wtrootValue.trim() ? expandTilde(wtrootValue.trim()) : null;
     const box: BoxDef = {
       id: idPreview,
       label: nameValue.trim(),
       color: PALETTE[colorIdx].hex,
-      path: pathValue.trim() ? expandTilde(pathValue.trim()) : null,
-      // Carried through rather than re-entered: `worktreeRoot` is edited in
-      // config.json, not here, so rebuilding the box from the panel's four
-      // fields would silently drop it and start scattering worktrees again.
-      worktreeRoot: editIdx !== null ? config.boxes[editIdx]?.worktreeRoot ?? null : null,
+      path: boxPath,
+      // Null means "beside the box folder", so an entry that resolves to exactly
+      // that is stored as null rather than as a value saying the same thing
+      // twice. This is also what keeps Enter-through on an existing box from
+      // rewriting config.json with a redundant field. A box with no folder can
+      // hold no root at all - `validateConfig` rejects that pairing.
+      worktreeRoot: wtroot && boxPath && wtroot !== path.dirname(boxPath) ? wtroot : null,
     };
     const boxes = isAdd
       ? [...config.boxes, box]
@@ -1201,7 +1243,19 @@ function SetupPanel({
         if (isAdd && nameValue === "" && pathValue.trim()) {
           setNameValue(path.basename(expandTilde(pathValue.trim())));
         }
-        setStep("name");
+        // A box with no folder never creates a worktree, so a root on one is a
+        // pairing `validateConfig` refuses. Skip the step rather than collect a
+        // value that cannot be saved.
+        if (!pathValue.trim()) {
+          setWtrootValue("");
+          setStep("name");
+          return;
+        }
+        if (wtrootValue.trim() === "") {
+          const boxPath = expandTilde(pathValue.trim());
+          setWtrootValue(defaultWorktreeRoot(boxPath) ?? "");
+        }
+        setStep("wtroot");
         return;
       }
       if (key.backspace || key.delete) {
@@ -1216,6 +1270,24 @@ function SetupPanel({
       return;
     }
 
+    if (step === "wtroot") {
+      if (key.return) {
+        if (wtrootBlocked) return;
+        setStep("name");
+        return;
+      }
+      if (key.backspace || key.delete) {
+        if (wtrootValue === "") {
+          setStep("path");
+          return;
+        }
+        setWtrootValue((v) => v.slice(0, -1));
+        return;
+      }
+      if (input && input >= " ") setWtrootValue((v) => (v + input).slice(0, 200));
+      return;
+    }
+
     if (step === "name") {
       if (key.return) {
         if (!nameIsValid) return;
@@ -1224,7 +1296,7 @@ function SetupPanel({
       }
       if (key.backspace || key.delete) {
         if (nameValue === "") {
-          setStep("path");
+          setStep(pathValue.trim() ? "wtroot" : "path");
           return;
         }
         setNameValue((v) => v.slice(0, -1));
@@ -1342,14 +1414,21 @@ function SetupPanel({
     >
       <Text bold>{`${isAdd ? "add box" : `edit ${config.boxes[editIdx ?? 0]?.label}`}`}</Text>
       <Box marginTop={1}>
-        <Text>{step === "path" ? "path  " : "name  "}</Text>
-        <Text>{step === "path" ? pathValue : nameValue}</Text>
+        <Text>{step === "path" ? "path    " : step === "wtroot" ? "wtroot  " : "name    "}</Text>
+        <Text>{step === "path" ? pathValue : step === "wtroot" ? wtrootValue : nameValue}</Text>
         <Text inverse> </Text>
       </Box>
       <Box marginTop={1} flexDirection="column">
         {step === "path" ? (
           <Text dimColor={pathIsValid(pathValue)} color={pathIsValid(pathValue) ? undefined : "red"}>
             {pathStatusText(pathValue)}
+          </Text>
+        ) : step === "wtroot" ? (
+          <Text
+            dimColor={!wtroot.blocked && !wtroot.warn}
+            color={wtroot.blocked ? "red" : wtroot.warn ? "yellow" : undefined}
+          >
+            {wtroot.text}
           </Text>
         ) : (
           <>
