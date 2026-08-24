@@ -22,7 +22,7 @@ function validConfig(overrides: Partial<Config> = {}): Config {
     version: 1,
     branchPrefix: "cc",
     notifications: false,
-    boxes: [{ id: "alpha", label: "Alpha", color: "#7FFFD4", path: null, worktreeRoot: null }],
+    boxes: [{ id: "alpha", label: "Alpha", color: "#7FFFD4", path: null, worktreeRoot: null, worktreeFolder: null }],
     ...overrides,
   };
 }
@@ -133,7 +133,9 @@ test("validateConfig: path must be null or an absolute, existing directory", () 
 
 test("saveConfig / loadConfig / configExists: round-trip through a temp file", () => {
   const p = tmpConfigPath();
-  const cfg = validConfig({ boxes: [{ id: "b", label: "B", color: "#87CEFA", path: null, worktreeRoot: null }] });
+  const cfg = validConfig({
+    boxes: [{ id: "b", label: "B", color: "#87CEFA", path: null, worktreeRoot: null, worktreeFolder: null }],
+  });
   saveConfig(cfg, p);
   assert.deepEqual(loadConfig(p), cfg);
 });
@@ -219,4 +221,26 @@ test("validateConfig: worktreeRoot cannot be the filesystem root", () => {
     boxes: [{ id: "a", label: "A", color: "#7FFFD4", path: os.tmpdir(), worktreeRoot: "/" }],
   });
   assert.throws(() => validateConfig(cfg), /filesystem root/);
+});
+
+test("validateConfig: worktreeFolder is optional, and absent normalises to null", () => {
+  const cfg = validConfig();
+  delete (cfg.boxes[0] as unknown as Record<string, unknown>).worktreeFolder;
+  assert.equal(validateConfig(cfg).boxes[0].worktreeFolder, null);
+});
+
+test("validateConfig: worktreeFolder is one name, not a path", () => {
+  const cfg = validConfig({
+    boxes: [
+      { id: "a", label: "A", color: "#7FFFD4", path: os.tmpdir(), worktreeRoot: null, worktreeFolder: "a/b" },
+    ],
+  });
+  assert.throws(() => validateConfig(cfg), /worktreeFolder is one folder name, not a path/);
+});
+
+test("validateConfig: worktreeFolder needs a folder to collect FOR", () => {
+  const cfg = validConfig({
+    boxes: [{ id: "a", label: "A", color: "#7FFFD4", path: null, worktreeRoot: null, worktreeFolder: "wt" }],
+  });
+  assert.throws(() => validateConfig(cfg), /worktreeFolder needs a path/);
 });

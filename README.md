@@ -248,15 +248,37 @@ is gitignored; `config.example.json` documents the shape:
 - `path` — an absolute path to an existing directory, or `null` for a
   catch-all box with no folder. A box whose folder is a git repository gets
   worktree support automatically; a plain folder does not.
-- `worktreeRoot` — optional, an absolute directory to collect this box's
-  worktrees in. Worktrees default to a sibling of the box's folder
-  (`<folder>_<slug>`), which is wrong whenever those siblings must not be
-  polluted: an umbrella checkout sits among the repos it coordinates, and a box
-  on `~/src` would drop worktrees straight into your home directory. The
-  directory is created on first use. Set it in the setup panel's `wtroot` step
-  or here in `config.json`; both refuse the filesystem root and any directory
-  inside the box's own repo. Leaving it empty in the panel stores `null`, which
-  is the sibling default.
+- `worktreeRoot` and `worktreeFolder` — optional, and used together to collect
+  this box's worktrees in a dedicated directory. The root says *where* the
+  collection lives, the folder *names* it: a root of `/calder` and a folder of
+  `duck_worktrees` puts every worktree in `/calder/duck_worktrees`.
+
+  ```
+  worktreeRoot    /calder
+  worktreeFolder  duck_worktrees
+  ->              /calder/duck_worktrees/duck_plt1836
+  ```
+
+  Both are set in the setup panel's `wtroot` and `wtfolder` steps, or here in
+  `config.json`. Both degrade in order: with no folder, worktrees collect
+  straight in the root; with no root either, they fall back to a sibling of the
+  box's folder, the placement the tool started with. That default is wrong
+  whenever those siblings must not be polluted — an umbrella checkout sits
+  among the repos it coordinates, and a box on `~/src` would drop worktrees
+  into your home directory.
+
+  The collection directory is created on first use. `worktreeRoot` must be
+  absolute, and refuses the filesystem root and anything inside the box's own
+  repo. `worktreeFolder` is one folder name and never a path, so it cannot
+  climb back out of the root you chose.
+
+  The leaf keeps its `<folder-name>_<slug>` shape even inside a dedicated
+  folder. That is what lets two boxes share one collection folder without
+  colliding on a slug they both use.
+
+  A new session's branch is always cut in the box's own checkout — `git -C
+  <box path> worktree add ... origin/main` — so a collection folder changes
+  where the worktree lands and never what it forks from.
 
 Everything else (whether a box is git-capable, a session's worktree path, its
 branch) is derived at use time from `path`, never stored, so nothing here can

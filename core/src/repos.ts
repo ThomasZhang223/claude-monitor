@@ -30,8 +30,48 @@ export function branchFor(slug: string, branchPrefix: string): string {
  */
 export function worktreePathFor(box: BoxDef, slug: string): string | null {
   if (!box.path) return null;
+  return path.join(worktreeCollectionDir(box)!, `${path.basename(box.path)}_${slug}`);
+}
+
+/**
+ * The directory this box's worktrees collect in, which is what `worktreeRoot`
+ * and `worktreeFolder` name between them.
+ *
+ * The root says WHERE the collection lives and the folder names it, so
+ * `/calder` plus `duck_worktrees` collects in `/calder/duck_worktrees`. Two
+ * fields rather than one joined path because the split has to survive a round
+ * trip through the setup panel: splitting a stored `/calder/duck_worktrees`
+ * back apart would be a guess, and a guess that reads a plain root of `/calder`
+ * as root `/` plus folder `calder`.
+ *
+ * Both are optional and degrade in that order. No folder collects directly in
+ * the root, which is what every config written before the folder existed means.
+ * No root at all falls back to the box folder's own parent, the placement the
+ * tool started with.
+ *
+ * The leaf keeps the `<folder-name>_<slug>` shape even inside a dedicated
+ * folder. It is mildly redundant for one box, and it is what lets two boxes
+ * share a collection folder without colliding on a slug they both use.
+ */
+export function worktreeCollectionDir(box: BoxDef): string | null {
+  if (!box.path) return null;
   const root = box.worktreeRoot ?? path.dirname(box.path);
-  return path.join(root, `${path.basename(box.path)}_${slug}`);
+  return box.worktreeFolder ? path.join(root, box.worktreeFolder) : root;
+}
+
+/**
+ * Why this is not a usable worktree folder name, or null if it is.
+ *
+ * A single path segment, and deliberately not a path: anything with a separator
+ * or a `..` in it would let the folder climb out of the root the user chose,
+ * which would make the root field a suggestion rather than a boundary.
+ */
+export function worktreeFolderProblem(folder: string): string | null {
+  if (folder.trim() === "") return "cannot be blank";
+  if (folder !== folder.trim()) return "cannot start or end with a space";
+  if (folder.includes("/") || folder.includes("\\")) return "is one folder name, not a path";
+  if (folder === "." || folder === "..") return "must be a real folder name";
+  return null;
 }
 
 /**

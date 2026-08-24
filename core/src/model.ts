@@ -61,6 +61,11 @@ export interface BoxDef {
    *  siblings that must not be polluted — an umbrella checkout whose siblings
    *  are other repos, or a home directory. */
   worktreeRoot?: string | null;
+  /** A single folder name, created inside `worktreeRoot`, that this box's
+   *  worktrees collect in — `duck_worktrees` under a root of `/calder` puts
+   *  them in `/calder/duck_worktrees`. Null puts them directly in the root,
+   *  which is what every config written before this field existed means. */
+  worktreeFolder?: string | null;
 }
 
 /** The preview box's border. White, distinct from every box colour. */

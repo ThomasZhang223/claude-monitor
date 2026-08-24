@@ -14,7 +14,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import { MODE_ORDER, SESSION_PREFIX, type BoxDef } from "./model.ts";
-import { worktreeRootProblem } from "./repos.ts";
+import { worktreeFolderProblem, worktreeRootProblem } from "./repos.ts";
 
 const REPO_ROOT = path.resolve(fileURLToPath(import.meta.url), "../../..");
 
@@ -125,7 +125,21 @@ export function validateConfig(raw: unknown): Config {
       worktreeRoot = b.worktreeRoot as string;
     }
 
-    return { id: b.id, label: b.label, color: b.color, path: boxPath, worktreeRoot };
+    // The folder created inside the root that this box's worktrees collect in.
+    // One name, never a path — `worktreeFolderProblem` is what keeps it from
+    // climbing back out of the root the author chose.
+    let worktreeFolder: string | null = null;
+    if (b.worktreeFolder !== undefined && b.worktreeFolder !== null) {
+      if (typeof b.worktreeFolder !== "string") {
+        fail(`boxes[${i}].worktreeFolder`, "must be null or a folder name");
+      }
+      if (!boxPath) fail(`boxes[${i}].worktreeFolder`, "needs a path - this box has no folder");
+      const problem = worktreeFolderProblem(b.worktreeFolder as string);
+      if (problem) fail(`boxes[${i}].worktreeFolder`, problem);
+      worktreeFolder = b.worktreeFolder as string;
+    }
+
+    return { id: b.id, label: b.label, color: b.color, path: boxPath, worktreeRoot, worktreeFolder };
   });
 
   return {
@@ -174,7 +188,9 @@ export function defaultConfig(): Config {
     version: 1,
     branchPrefix: "cc",
     notifications: false,
-    boxes: [{ id: "general", label: "general", color: "#C9A227", path: null, worktreeRoot: null }],
+    boxes: [
+      { id: "general", label: "general", color: "#C9A227", path: null, worktreeRoot: null, worktreeFolder: null },
+    ],
   };
 }
 
