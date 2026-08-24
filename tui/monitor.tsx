@@ -2234,7 +2234,7 @@ function Dashboard() {
         <Text dimColor>{" ↑↓ session  ←→ box  ⏎ new window  a attach here  f flag  "}</Text>
         {/* Name the target box: `n` acts on the selection, not on the cursor's
             session, and that is only obvious if it says so. */}
-        <Text color={focusedBox.color}>{`n new in ${focusedBox.label}  N question`}</Text>
+        <Text color={focusedBox.color}>{`n new in ${focusedBox.label}`}</Text>
         <Text dimColor>{"  S setup  x kill  p preview  q quit"}</Text>
         {busy ? <Text color="yellow">{`  ${busy}...`}</Text> : null}
         {/* A wrap can run for minutes, so say what is being waited on rather than
