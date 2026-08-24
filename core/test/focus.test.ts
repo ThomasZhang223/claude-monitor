@@ -30,6 +30,7 @@ function record(box: BoxId, mode: Mode, slug: string): SessionRecord {
     model: null,
     effort: null,
     runtimeMs: null,
+    wrap: null,
     flagged: false,
   };
 }

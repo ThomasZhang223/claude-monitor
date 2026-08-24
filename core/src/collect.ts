@@ -33,11 +33,13 @@ import {
   OPT_PLAN,
   OPT_RECAP,
   OPT_WORKTREE,
+  OPT_WRAP,
   STATE_DIR,
   type PaneRecord,
   type SessionRecord,
   type Status,
 } from "./model.ts";
+import { decodeWrap } from "./wrap.ts";
 import { readUsageSnapshot, type UsageDeps, type UsageSnapshot } from "./usage.ts";
 
 /**
@@ -209,6 +211,7 @@ export async function collectSessions(
       model: snap?.modelName ?? null,
       effort: snap?.effortLevel ?? null,
       runtimeMs: snap?.durationMs ?? null,
+      wrap: decodeWrap(opts[OPT_WRAP]),
       // Presence alone would read a hand-set `@cc_flag 0` as flagged, so this
       // compares against the one value the dashboard ever writes.
       flagged: opts[OPT_FLAG] === FLAG_ON,

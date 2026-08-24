@@ -31,9 +31,10 @@ export function isNotifyStatus(status: Status): status is NotifyStatus {
 }
 
 /** How long a transitioned-into status must persist before it's treated as
- *  real, so a flicker between turns doesn't fire a false alert. Short: a
- *  notification is non-destructive, so there is little to lose from
- *  occasionally firing a beat early. */
+ *  real, so a flicker between turns doesn't fire a false alert. Modeled on
+ *  the wrap-before-kill settle window (`WRAP_SETTLE_MS`, 15s) but shorter: a
+ *  notification is non-destructive, unlike a kill, so there is less to lose
+ *  from occasionally firing a beat early. */
 export const NOTIFY_SETTLE_MS = 5_000;
 
 const TITLES: Record<NotifyStatus, string> = {

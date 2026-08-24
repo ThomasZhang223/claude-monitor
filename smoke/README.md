@@ -6,6 +6,8 @@ then tear them down. They are the tests that cannot be faked with fixtures.
     npx tsx smoke/e2e.mts         # spawn, worktree, panes, journal, adopt, teardown
     npx tsx smoke/status.mts      # live status transitions: working -> awaiting
     npx tsx smoke/permission.mts  # an implement pane blocked on a real permission prompt
+    npx tsx smoke/wrap-clear.mts  # the composer is empty before /wrap is typed into it
+    smoke/wrap-restart.sh         # a wrap orphaned by a dashboard restart is still finished
     smoke/resize.sh               # the dashboard's frame follows the terminal on resize
     smoke/keys.sh                 # the UI itself: keys into a pty, screen out
     SMOKE_WORK=1 smoke/keys.sh    # ...plus a real worktree work session, then removes it
@@ -54,6 +56,12 @@ covered by a test:
   status file says `busy` throughout. Three independent locks on the one status
   the implement pane spends its blocked time in.
 
+- A wrap-then-kill left the session alive. The pending kill lived only in the
+  dashboard's React state, and the dashboard was relaunched six minutes before
+  the second pane's wrap finished — so nothing was listening when it went quiet.
+  Nothing that runs one dashboard for the whole test can see this; the job has to
+  outlive the process that created it.
+
 - Clicking a notification did nothing at all. `-execute` is run by a
   terminal-notifier that Notification Center *relaunched*, so it inherits
   launchd's PATH (`/usr/bin:/bin:/usr/sbin:/sbin`) and not a login shell's —
@@ -92,6 +100,23 @@ covered by a test:
   (`error`/`message`/`status`/`reason`, or the whole thing when it is a string) —
   never the plan text, and never the plan's file name either, since plan slugs are
   derived from the prompt.
+
+- A wrap fired at a pane holding a stale draft arrived as `sho/wrap`, which is not
+  a slash command at all — it ran only because Claude inferred the intent, and the
+  session was killed either way. Two rounds of reasoning blamed the wrong thing.
+  First a status gate that supposedly skipped the clear: the pane had been quiet
+  2h40m, so its status *was* `awaiting` and the clear did run. Then
+  `send-keys Escape Escape` batching two presses into one key event, which is
+  plausible, documented as the same trap `SUBMIT_GAP_MS` covers, and false —
+  batched, it clears a real draft 3 times out of 3. **The variable was the gap
+  after the clear, and nothing else.** `sendWrap` sent the escapes and the text
+  back to back with no settle, so both landed in the same read and the clear was
+  lost: 5 of 5 trials mangled at no gap, 14 of 14 clean at 50ms and up, and
+  splitting the escapes changed neither column. Two hypotheses that each named a
+  real mechanism, and the one-line measurement that separated them was cheaper
+  than either argument. `wrap-clear.mts` phase 3 now reproduces the mangling on
+  purpose and aborts if it cannot, because a test that goes green against the old
+  code proves nothing about the new one.
 
 One gotcha worth knowing before extending these: `terminal-notifier -list ALL`
 answers in ~60ms from a shell but never returns when run from a Node child

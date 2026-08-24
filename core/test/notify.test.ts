@@ -32,6 +32,7 @@ function record(over: Partial<SessionRecord> = {}): SessionRecord {
     model: null,
     effort: null,
     runtimeMs: null,
+    wrap: null,
     flagged: false,
     ...over,
   };

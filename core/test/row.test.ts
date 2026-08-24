@@ -70,6 +70,7 @@ function record(panes: PaneRecord[], over: Partial<SessionRecord> = {}): Session
     model: null,
     effort: null,
     runtimeMs: null,
+    wrap: null,
     flagged: false,
     ...over,
   };

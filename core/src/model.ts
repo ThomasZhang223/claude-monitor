@@ -282,9 +282,31 @@ export interface SessionRecord {
   effort: string | null;
   /** Wall-clock runtime so far, from the per-session snapshot. */
   runtimeMs: number | null;
+  /** An in-flight `/wrap` this session is being killed after, from @cc_wrap. */
+  wrap: PendingWrap | null;
   /** Whether this session is flagged as one being actively worked on, from
    *  @cc_flag. Display only — nothing else reads it. */
   flagged: boolean;
+}
+
+/**
+ * The part of an in-flight wrap that rides the tmux session.
+ *
+ * Enough to resume the wait after the dashboard restarts: which pane the
+ * command went to, which pane is queued behind it, and when it was sent. The
+ * label a waiting message uses is not here — it comes off the record.
+ *
+ * Declared in this module rather than in wrap.ts, the same way AutoRecap is,
+ * because SessionRecord carries one and this is the module that imports from no
+ * sibling.
+ */
+export interface PendingWrap {
+  /** Pane the command was sent to. */
+  pane: number;
+  /** The pane still queued after this one goes quiet, or null if this is the
+   *  last (or only) pane. */
+  next: number | null;
+  sentAt: number;
 }
 
 export interface PaneRecord {
@@ -328,15 +350,18 @@ export const OPT_RECAP = "@cc_recap";
 export const OPT_WORKTREE = "@cc_worktree";
 export const OPT_CREATED = "@cc_created";
 export const OPT_PLAN = "@cc_plan";
+/** An in-flight `/wrap` the session is to be killed after. Here rather than in
+ *  the dashboard's own memory so that quitting the dashboard mid-wrap loses
+ *  nothing: the intent belongs to the session, and dies with it. */
+export const OPT_WRAP = "@cc_wrap";
 /**
  * Sessions being actively worked on right now, as opposed to parked open.
  *
- * A display marker and nothing else reads it — but it rides the session for
- * the same reason every other option here does: it is a fact about the
- * session, not about whichever dashboard process last polled it. `monitor`
- * has no hot reload outside `--dev`, so relaunching it to pick up an edit
- * must not silently clear every flag, and a file under STATE_DIR would
- * outlive the session it describes.
+ * A display marker and nothing else reads it — but it rides the session for the
+ * same reason OPT_WRAP does: it is a fact about the session, not about whichever
+ * dashboard process last polled it. `monitor` has no hot reload outside `--dev`,
+ * so relaunching it to pick up an edit must not silently clear every flag, and a
+ * file under STATE_DIR would outlive the session it describes.
  *
  * ceiling: one boolean per session, not a set of named or coloured labels. If
  * several concurrent workstreams ever need telling apart, this becomes a small
@@ -348,19 +373,15 @@ export const OPT_FLAG = "@cc_flag";
  *  encoded, but both sides compare against one constant so they cannot drift. */
 export const FLAG_ON = "1";
 
-/**
- * Order is load-bearing: it is the field order of the batched `-F` read that
- * parseSessionsOutput splits positionally. Append, never insert — except a
- * removal is safe here for the same reason it was when `@cc_rc` went: this is
- * a new, not-yet-daily-driven tool with no installed base, and the reader and
- * writer of this array are the same code.
- */
+/** Order is load-bearing: it is the field order of the batched `-F` read that
+ *  parseSessionsOutput splits positionally. Append, never insert. */
 export const ALL_OPTS = [
   OPT_LABEL,
   OPT_RECAP,
   OPT_WORKTREE,
   OPT_CREATED,
   OPT_PLAN,
+  OPT_WRAP,
   OPT_FLAG,
 ] as const;
 
