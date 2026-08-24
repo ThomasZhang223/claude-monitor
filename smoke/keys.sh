@@ -345,11 +345,10 @@ if [ -n "$new_tty" ]; then
 fi
 
 echo
-echo "kill asks first, and can wrap before it"
+echo "kill asks first"
 keys "x"
 check "the kill prompt names the session" "Kill "
 check "the kill prompt promises not to touch git" "worktree and branch are left alone"
-check "the prompt offers a wrap first" "wrap first"
 check "the prompt offers an immediate kill" "kill now"
 keys Escape
 check "escape backs out without killing anything" "n new in general"

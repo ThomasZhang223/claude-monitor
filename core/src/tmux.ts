@@ -173,38 +173,6 @@ export function looksLikePrompt(capturedText: string): boolean {
   return capturedText.includes("Esc to cancel");
 }
 
-/** The composer's prompt marker as 2.1.220 draws it. */
-const COMPOSER_PROMPT = "❯";
-
-/**
- * What is sitting in the pane's input composer row, or null when no composer
- * row is on screen at all.
- *
- * NOT an emptiness test. An idle composer draws ghost placeholder text, so a
- * cleared one reads back as `Try "how does <filepath> work?"` rather than "".
- * This answers "is exactly X staged", which is decidable; "is it empty" is not.
- *
- * Scanned bottom-up. Transcript output above the composer can contain the same
- * glyph — a pasted shell prompt, a quoted diff — while the rows below it never
- * do; they are the rule, the model line, the context bars and the mode hint. A
- * draft long enough to wrap marks only its first row, which is the row worth
- * reading: if the composer was cleared, what was typed next is alone on it.
- *
- * Version and locale specific, like looksLikePrompt, so callers must treat
- * null as "could not tell" and not as "empty". A release that changes the
- * glyph should cost a check, not a feature.
- */
-export function composerText(capturedText: string): string | null {
-  const lines = capturedText.split("\n");
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const line = lines[i].trimStart();
-    if (line.startsWith(COMPOSER_PROMPT)) {
-      return line.slice(COMPOSER_PROMPT.length).trim();
-    }
-  }
-  return null;
-}
-
 // ---------------------------------------------------------------------------
 // Reads
 // ---------------------------------------------------------------------------
@@ -329,71 +297,6 @@ export async function unsetOption(
   if (!tmux) return false;
   const res = await execFn(
     `${tmux} set-option -t ${shellQuote(session)} -u ${shellQuote(name)} 2>/dev/null`,
-    TMUX_TIMEOUT_MS,
-  );
-  return res.ok;
-}
-
-/**
- * Clear whatever is currently sitting in a pane's input composer, so text
- * typed next lands alone on the line rather than appended after a stale draft.
- *
- * Double `Esc` is Claude Code's own "clear the draft" binding, and one batched
- * `send-keys` delivers it correctly — measured, because the opposite was
- * assumed for a while: three of three trials cleared a real draft. What the
- * clear needs is a SETTLE AFTER IT, before anything is typed. With no gap the
- * escapes and the text land in the same read and the clear is lost entirely,
- * which is what turned a wrap into `sho/wrap`. Callers must wait; see
- * CLEAR_GAP_MS in send.ts, which owns that timing for every caller.
- *
- * Called unconditionally on the wrap path, whatever the pane's status. On a
- * `working` pane the first Esc interrupts the turn, and on one blocked at a
- * permission prompt it dismisses the prompt ("Esc to cancel"). Both are
- * acceptable where this is used — a session being wrapped is a session being
- * retired, and neither outcome destroys work the wrap is about to write down.
- * Gating on status instead is what left a busy pane's draft in place before.
- */
-export async function clearDraft(target: string, execFn: Exec = execAsync): Promise<boolean> {
-  const tmux = await getTmuxBin(execFn);
-  if (!tmux) return false;
-  const res = await execFn(
-    `${tmux} send-keys -t ${shellQuote(target)} Escape Escape 2>/dev/null`,
-    TMUX_TIMEOUT_MS,
-  );
-  return res.ok;
-}
-
-/**
- * Type text into a live pane, literally.
- *
- * `-l` matters: without it tmux interprets the argument as key names, so a
- * command containing anything resembling a key ("Enter", "C-c") would be sent as
- * that key rather than as characters.
- *
- * Text and submit are separate calls on purpose — see sendEnter.
- */
-export async function sendText(
-  target: string,
-  text: string,
-  execFn: Exec = execAsync,
-): Promise<boolean> {
-  const tmux = await getTmuxBin(execFn);
-  if (!tmux) return false;
-  const res = await execFn(
-    `${tmux} send-keys -t ${shellQuote(target)} -l ${shellQuote(text)} 2>/dev/null`,
-    TMUX_TIMEOUT_MS,
-  );
-  return res.ok;
-}
-
-/** Submit what was typed. Always a separate call after a short gap: Claude's
- *  input needs the line to land before the newline, and sending both in one
- *  command is what makes a delivered prompt arrive half-typed. */
-export async function sendEnter(target: string, execFn: Exec = execAsync): Promise<boolean> {
-  const tmux = await getTmuxBin(execFn);
-  if (!tmux) return false;
-  const res = await execFn(
-    `${tmux} send-keys -t ${shellQuote(target)} Enter 2>/dev/null`,
     TMUX_TIMEOUT_MS,
   );
   return res.ok;

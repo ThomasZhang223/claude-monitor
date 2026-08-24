@@ -182,7 +182,7 @@ keep seeing your own.
 | `n` | New session in the selected box (class picker first) |
 | `N` | New QUESTIONS session, straight to naming |
 | `f` | Flag/unflag the cursor's session |
-| `x` | Kill (with an option to `/wrap` first) |
+| `x` | Kill (asks first) |
 | `p` | Toggle the preview pane |
 | `S` | Open the setup panel |
 | `q` | Quit the dashboard (sessions keep running) |

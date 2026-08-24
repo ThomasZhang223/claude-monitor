@@ -17,7 +17,6 @@ import {
   MODES,
   MODE_ORDER,
   OPT_FLAG,
-  OPT_WRAP,
   POLL_MS,
   PREVIEW_MS,
   PREVIEW_COLOR,
@@ -65,14 +64,6 @@ import { promptTailLines } from "../core/src/prompt.ts";
 import { spawnSession } from "../core/src/spawn.ts";
 import { attachSession, killSession } from "../core/src/attach.ts";
 import { openInNewTerminal } from "../core/src/terminal.ts";
-import {
-  WRAP_TIMEOUT_MS,
-  decideWrap,
-  encodeWrap,
-  wrapOrder,
-  sendWrap,
-  type WrapJob,
-} from "../core/src/wrap.ts";
 import { setOption, unsetOption } from "../core/src/tmux.ts";
 import {
   fireNotification,
@@ -1431,13 +1422,11 @@ function Dashboard() {
   const [rowRecaps, setRowRecaps] = useState<Record<string, string>>({});
   /** A just-created session to move the cursor onto, once the poll sees it. */
   const [pendingFocus, setPendingFocus] = useState<string | null>(null);
-  /** Sessions running /wrap, to be killed once each goes quiet. */
-  const [wraps, setWraps] = useState<Record<string, WrapJob>>({});
   /** An `f` keypress not yet confirmed by the poll. `records` is up to 2s
    *  behind, and this codebase documents that lag as reading like "the key
    *  doing nothing at all" - so the intended value is shown immediately and
-   *  folded over the real one in withBranches, the same self-clearing shape
-   *  as droppedWraps below. */
+   *  folded over the real one in withBranches, self-clearing once the poll
+   *  agrees with it. */
   const [pendingFlags, setPendingFlags] = useState<Record<string, boolean>>({});
 
   const boxIds = useMemo(() => config.boxes.map((b) => b.id), [config.boxes]);
@@ -1744,9 +1733,8 @@ function Dashboard() {
   }, [focusedName, focusedCreated, paneClaudeKey, showPreview]);
 
   // A pending flag clears itself once the poll agrees with it, or once the
-  // session it named is gone - the same self-clearing shape as droppedWraps
-  // just below, for the same reason: records is up to a poll old, so nothing
-  // else would ever remove the entry.
+  // session it named is gone: records is up to a poll old, so nothing else
+  // would ever remove the entry.
   useEffect(() => {
     setPendingFlags((p) => {
       if (Object.keys(p).length === 0) return p;
@@ -1779,26 +1767,6 @@ function Dashboard() {
     );
   };
 
-  /**
-   * Sessions whose wrap we have deliberately stopped tracking.
-   *
-   * `records` is up to a poll old, so for one tick after we unset `@cc_wrap` the
-   * option is still in the snapshot. Without this, dropping a job and then
-   * re-adopting it from that stale copy would spin. Entries clear themselves
-   * once the snapshot catches up.
-   */
-  const droppedWraps = useRef<Set<string>>(new Set());
-
-  const dropWrap = (tmuxName: string) => {
-    droppedWraps.current.add(tmuxName);
-    setWraps((w) => {
-      if (!w[tmuxName]) return w;
-      const next = { ...w };
-      delete next[tmuxName];
-      return next;
-    });
-  };
-
   const kill = (target: SessionRecord) => {
     setBusy(`killing ${target.label}`);
     void killSession(target.tmuxName, {
@@ -1810,120 +1778,9 @@ function Dashboard() {
       recap: target.recap,
     }).then((err) => {
       setBusy(null);
-      // No unsetOption: the session is gone and took its options with it.
-      dropWrap(target.tmuxName);
       if (err) say(err);
     });
   };
-
-  /**
-   * Send `/wrap` to one pane and let the poll loop advance to the next once it
-   * goes quiet - or kill the session, if there is no next pane.
-   *
-   * The job is written to the tmux session as well as to state. A wrap runs for
-   * minutes, and anything that ends this process in that window - a crash, or
-   * simply relaunching to pick up an edit - used to drop the pending kill on the
-   * floor with no notice. On the session it survives us.
-   */
-  const runWrapStep = (target: SessionRecord, pane: number, next: number | null) => {
-    void sendWrap(target.tmuxName, pane).then((err) => {
-      if (err) {
-        say(err);
-        return;
-      }
-      const pending = { pane, next, sentAt: Date.now() };
-      void setOption(target.tmuxName, OPT_WRAP, encodeWrap(pending));
-      setWraps((w) => ({
-        ...w,
-        [target.tmuxName]: { tmuxName: target.tmuxName, label: target.label, ...pending },
-      }));
-    });
-  };
-
-  /**
-   * Start the wrap sequence: plan pane first, then implement.
-   *
-   * One pane at a time. Both panes of a work session wrapping at once would be
-   * two Claudes writing into the same inbox simultaneously, which is a known
-   * way to lose one of the two notes - and wrapping plan first means its note
-   * exists before implement's wrap folds in whatever fixes and review rounds
-   * happened after planning.
-   */
-  const startWrap = (target: SessionRecord) => {
-    const order = wrapOrder(target.panes);
-    const [pane, ...rest] = order;
-    if (pane === undefined) {
-      // Nothing alive in there to wrap, so there is nothing to wait for either.
-      kill(target);
-      return;
-    }
-    runWrapStep(target, pane, rest[0] ?? null);
-  };
-
-  // A wrap outlives the dashboard that started it. The job rides the tmux
-  // session, so a relaunch mid-wrap - a crash, or just restarting to pick up an
-  // edit - picks the wait back up instead of leaving a wrapped session alive
-  // forever with nothing listening for it to go quiet.
-  //
-  // Watch only. The persisted job means `/wrap` was already sent; sending it
-  // again would queue a second one behind the first and write the note twice.
-  useEffect(() => {
-    const stillPending = new Set(records.filter((r) => r.wrap).map((r) => r.tmuxName));
-    for (const name of droppedWraps.current) {
-      if (!stillPending.has(name)) droppedWraps.current.delete(name);
-    }
-
-    const now = Date.now();
-    for (const record of records) {
-      const pending = record.wrap;
-      if (!pending) continue;
-      if (wraps[record.tmuxName] || droppedWraps.current.has(record.tmuxName)) continue;
-      if (now - pending.sentAt >= WRAP_TIMEOUT_MS) {
-        // Old enough that the wrap is long over and the session may well have
-        // been picked back up since. Report it rather than kill on a guess.
-        droppedWraps.current.add(record.tmuxName);
-        void unsetOption(record.tmuxName, OPT_WRAP);
-        say(`${record.label}: dropped a stale pending wrap, session left alive`);
-        continue;
-      }
-      setWraps((w) => ({
-        ...w,
-        [record.tmuxName]: { tmuxName: record.tmuxName, label: record.label, ...pending },
-      }));
-    }
-  }, [records, wraps]);
-
-  // Outstanding wraps, checked once per poll. A wrap that stalls leaves its
-  // session alive: killing mid-wrap would destroy the note the wrap exists to
-  // write, which is the whole point of doing this at all.
-  useEffect(() => {
-    const jobs = Object.values(wraps);
-    if (jobs.length === 0) return;
-    const now = Date.now();
-    for (const job of jobs) {
-      const record = records.find((r) => r.tmuxName === job.tmuxName);
-      if (!record) {
-        // Gone by other means - killed from a terminal, or the server restarted.
-        dropWrap(job.tmuxName);
-        continue;
-      }
-      // The pane THIS job is waiting on, not the session's worst-of-both-panes
-      // status - the other pane sitting on a stale "awaiting" or "permission"
-      // must not read as the wrap itself being stuck or errored.
-      const paneStatus = record.panes.find((p) => p.paneIndex === job.pane)?.status ?? "dead";
-      const step = decideWrap(job, paneStatus, now);
-      if (step.kind === "kill") {
-        if (job.next !== null) runWrapStep(record, job.next, null);
-        else kill(record);
-      } else if (step.kind === "giveup") {
-        say(step.reason);
-        // Unset as well as untrack, so the next dashboard does not adopt a job
-        // this one already decided to abandon.
-        void unsetOption(job.tmuxName, OPT_WRAP);
-        dropWrap(job.tmuxName);
-      }
-    }
-  }, [records, wraps]);
 
   // Ink's useInput needs raw mode, which is unavailable when stdin is piped or
   // redirected. Guarding lets the dashboard still render in that case (a smoke
@@ -1933,12 +1790,10 @@ function Dashboard() {
   useInput(
     (input, key) => {
       if (view === "confirm-kill") {
-        if ((input === "y" || input === "w") && focused) {
+        if (input === "y" && focused) {
           const target = focused;
-          const wrapFirst = input === "w";
           setView("dash");
-          if (wrapFirst) startWrap(target);
-          else kill(target);
+          kill(target);
         } else {
           setView("dash");
         }
@@ -2069,9 +1924,9 @@ function Dashboard() {
 
   // A prompt gets its rows reserved before anything else is laid out, and only as
   // many as its current step needs - see wizardRows/setupRows.
-  // Border 2, the question, the reassurance, a blank, the keys - plus one spare,
-  // for the same reason wizardRows takes the worst case.
-  const KILL_PROMPT_ROWS = 7;
+  // Border 2, the question, the reassurance, the keys - plus one spare, for
+  // the same reason wizardRows takes the worst case.
+  const KILL_PROMPT_ROWS = 5;
   const modalRows =
     view === "wizard"
       ? wizardRows(wizardStep)
@@ -2093,8 +1948,6 @@ function Dashboard() {
   const awaiting = records.filter(
     (r) => r.status === "awaiting" || r.status === "permission",
   ).length;
-
-  const wrapLabels = Object.values(wraps).map((w) => w.label);
 
   // A notice outlives a poll tick but not the screen: it fades on its own so the
   // footer does not accumulate stale outcomes. `now` advances on every tick, so
@@ -2214,11 +2067,7 @@ function Dashboard() {
             <Text dimColor>
               {"The tmux session only - the worktree and branch are left alone."}
             </Text>
-            <Box marginTop={1}>
-              <Text bold color="green">
-                {"w"}
-              </Text>
-              <Text dimColor>{" wrap first, then kill when it goes quiet    "}</Text>
+            <Box>
               <Text bold>{"y"}</Text>
               <Text dimColor>{" kill now    any key cancels"}</Text>
             </Box>
@@ -2230,14 +2079,9 @@ function Dashboard() {
         <Text dimColor>{" ↑↓ session  ←→ box  ⏎ new window  a attach here  f flag  "}</Text>
         {/* Name the target box: `n` acts on the selection, not on the cursor's
             session, and that is only obvious if it says so. */}
-        <Text color={focusedBox.color}>{`n new in ${focusedBox.label}  N question`}</Text>
+        <Text color={focusedBox.color}>{`n new in ${focusedBox.label}`}</Text>
         <Text dimColor>{"  S setup  x kill  p preview  q quit"}</Text>
         {busy ? <Text color="yellow">{`  ${busy}...`}</Text> : null}
-        {/* A wrap can run for minutes, so say what is being waited on rather than
-            leaving a session that looks alive but is about to be killed. */}
-        {wrapLabels.length > 0 ? (
-          <Text color="green">{`  wrapping ${wrapLabels.join(", ")} before kill...`}</Text>
-        ) : null}
         {message ? <Text color={messageIsError ? "red" : "yellow"}>{`  ${message}`}</Text> : null}
       </Box>
 

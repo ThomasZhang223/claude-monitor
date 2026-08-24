@@ -6,8 +6,6 @@ import {
   buildCreateSessionCmd,
   buildSplitWindowCmd,
   capturePane,
-  clearDraft,
-  composerText,
   getOption,
   hasSession,
   isClaudeCommand,
@@ -150,7 +148,7 @@ test("parseSessionsOutput: the last option in ALL_OPTS is read, not dropped off 
   // The parse is positional, so a newly appended option is exactly the one an
   // off-by-one would silently swallow. @cc_flag is last: losing it would mean
   // a restarted dashboard never sees a session flagged before it restarted.
-  const fields = ["cc-alpha-work-packaging", "packaging", "", "", "", "", "", "1"];
+  const fields = ["cc-alpha-work-packaging", "packaging", "", "", "", "", "1"];
   assert.equal(fields.length, ALL_OPTS.length + 1, "fixture must carry every option");
   const [row] = parseSessionsOutput(fields.join(TAB), BOX_IDS);
   assert.equal(row.options["@cc_flag"], "1");
@@ -333,53 +331,4 @@ test("capturePane: a non-integer line count cannot reach the shell", async () =>
   await capturePane("t", -5, exec);
   assert.ok(calls[1].includes("tail -10"));
   assert.ok(calls[2].includes("tail -1"));
-});
-
-// ---------------------------------------------------------------------------
-// clearDraft / composerText
-
-test("clearDraft: one send-keys carrying both escapes, and it reports a failure", async () => {
-  // Batched on purpose. It was suspected of collapsing into a single key event
-  // and leaving the draft behind, and that was measured to be false: batched, it
-  // clears 3 times out of 3. What the clear needs is a gap AFTER it, which is
-  // the caller's to give - see CLEAR_GAP_MS in wrap.ts.
-  resetTmuxBin();
-  const { exec, calls } = fakeExec();
-  assert.equal(await clearDraft("cc-general-work-x.1", exec), true);
-  const tmuxCalls = calls.filter((c) => !c.includes("command -v"));
-  assert.equal(tmuxCalls.length, 1);
-  assert.match(tmuxCalls[0], /send-keys -t 'cc-general-work-x\.1' Escape Escape/);
-
-  resetTmuxBin();
-  assert.equal(await clearDraft("cc-general-work-x.1", noTmuxExec), false);
-});
-
-test("composerText: reads the composer row, bottom-up, and says when it cannot", () => {
-  // Shaped after a real capture: the composer sits between two rules, with the
-  // status line under it.
-  const screen = [
-    "  I'll start by reading the repo.",
-    "────────────────────────────────────────",
-    "❯ /wrap",
-    "────────────────────────────────────────",
-    "  [Sonnet 5 high] │ myrepo main",
-    "  ⏵⏵ auto mode on (shift+tab to cycle)",
-  ].join("\n");
-  assert.equal(composerText(screen), "/wrap");
-
-  // The failure this exists to catch.
-  assert.equal(composerText("❯ sho/wrap  \n──────\n"), "sho/wrap");
-
-  // NOT an emptiness test: an idle composer draws ghost placeholder text, so
-  // "cleared" reads back as the placeholder rather than as "".
-  assert.equal(composerText('❯ Try "how does <filepath> work?"'), 'Try "how does <filepath> work?"');
-  assert.equal(composerText("❯ "), "");
-
-  // Bottom-up: transcript output can quote the same glyph, the rows below the
-  // composer never do.
-  assert.equal(composerText("  ran: ❯ npm test\n────\n❯ /wrap\n────\n  ctx 27%"), "/wrap");
-
-  // No composer at all is "could not tell", never "empty" - callers fail open.
-  assert.equal(composerText("just some scrollback\nno prompt here"), null);
-  assert.equal(composerText(""), null);
 });
