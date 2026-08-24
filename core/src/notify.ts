@@ -44,6 +44,16 @@ const TITLES: Record<NotifyStatus, string> = {
   dead: "Process Ended",
 };
 
+/** libnotify urgency per status. `critical` is reserved for the two that stall
+ *  work outright — on GNOME it is the only level that stays on screen until
+ *  dismissed, so spending it on `awaiting` would leave a wall of banners. */
+const URGENCIES: Record<NotifyStatus, "low" | "normal" | "critical"> = {
+  awaiting: "normal",
+  permission: "critical",
+  error: "critical",
+  dead: "normal",
+};
+
 const SOUNDS: Record<NotifyStatus, string> = {
   awaiting: "Glass",
   permission: "Ping",
@@ -128,6 +138,9 @@ export interface NotificationContent {
   subtitle: string;
   message: string;
   sound: string;
+  /** libnotify urgency. macOS has no equivalent, so `terminal-notifier`
+   *  ignores it and expresses the same distinction through `sound`. */
+  urgency: "low" | "normal" | "critical";
   /** terminal-notifier group id. Notifications sharing a group replace one
    *  another, so this is per PANE, never per session: grouping by session would
    *  make a work session's two panes silently overwrite each other, which is
@@ -177,6 +190,7 @@ export function buildNotificationContent(
     subtitle: record.tmuxName,
     message: `${worktreeLine}\n${paneSummary(pane)}`,
     sound: SOUNDS[pane.status],
+    urgency: URGENCIES[pane.status],
     group: paneNotifyKey(record.tmuxName, pane.paneIndex),
   };
 }
@@ -192,40 +206,42 @@ export function buildNotificationContent(
 const REPO_ROOT = path.resolve(fileURLToPath(import.meta.url), "../../..");
 const ATTACH_BIN = path.join(REPO_ROOT, "bin", "monitor-attach");
 
-/** Builds this pane's notification content and shells out to
- *  `terminal-notifier`. No-ops (with a console warning) if it isn't on PATH -
- *  same fail-open spirit as the shell hooks in `hooks/`, since a missing
- *  optional dependency should never break the dashboard around it. */
-export async function fireNotification(
-  record: SessionRecord,
-  pane: PaneRecord,
+/**
+ * The notifier this machine has, or `none`.
+ *
+ * One per platform, and not interchangeable: `terminal-notifier` is a macOS
+ * binary, `notify-send` speaks the freedesktop D-Bus spec. Both are optional —
+ * a missing one warns once and no-ops, the same fail-open spirit as the shell
+ * hooks in `hooks/`, since an optional dependency should never break the
+ * dashboard around it.
+ */
+export type NotifierKind = "terminal-notifier" | "notify-send" | "none";
+
+export async function detectNotifier(
   exec: Exec = execAsync,
-): Promise<void> {
-  const content = buildNotificationContent(record, pane);
-  if (!content) return;
+  platform: string = process.platform,
+): Promise<NotifierKind> {
+  const bin: NotifierKind = platform === "darwin" ? "terminal-notifier" : "notify-send";
+  const found = await exec(`command -v ${bin}`, 2000);
+  return found.ok && found.stdout.trim() ? bin : "none";
+}
 
-  const available = await exec("command -v terminal-notifier", 2000);
-  if (!available.ok || !available.stdout.trim()) {
-    console.error(
-      "terminal-notifier not found on PATH - desktop notifications are disabled " +
-        "(install with `brew install terminal-notifier`)",
-    );
-    return;
-  }
-
-  // Clicking the notification body attaches. There are deliberately no Attach /
-  // Dismiss BUTTONS: `-actions` is not a terminal-notifier flag at all (it
-  // belongs to `alerter`, and to some terminal-notifier forks), and 2.0.0
-  // silently ignores unknown flags - so passing it produced a command that
-  // looked right, tested green against the composed string, and rendered no
-  // buttons whatsoever. `-execute` is the real supported mechanism, and one
-  // click on the banner is the same gesture the buttons were there to provide.
-  //
-  // tmuxName is a sanitised identifier by construction (see naming.ts), not
-  // free-form text, so it needs no quoting of its own - only the combined
-  // inner command needs one layer of quoting, for the outer -execute flag.
-  const attachCmd = `${ATTACH_BIN} ${record.tmuxName}`;
-  const cmd = [
+/**
+ * The `terminal-notifier` command line.
+ *
+ * Clicking the notification body attaches. There are deliberately no Attach /
+ * Dismiss BUTTONS: `-actions` is not a terminal-notifier flag at all (it
+ * belongs to `alerter`, and to some terminal-notifier forks), and 2.0.0
+ * silently ignores unknown flags - so passing it produced a command that
+ * looked right, tested green against the composed string, and rendered no
+ * buttons whatsoever. `-execute` is the real supported mechanism, and one
+ * click on the banner is the same gesture the buttons were there to provide.
+ */
+export function terminalNotifierCommand(
+  content: NotificationContent,
+  attachCmd: string,
+): string {
+  return [
     "terminal-notifier",
     "-title",
     shellQuote(content.title),
@@ -240,6 +256,81 @@ export async function fireNotification(
     "-execute",
     shellQuote(attachCmd),
   ].join(" ");
+}
+
+/**
+ * The `notify-send` command line.
+ *
+ * Three things differ from the macOS shape, all forced by libnotify:
+ *
+ *  - **No subtitle.** The spec has a summary and a body, nothing between, so
+ *    the session name leads the body instead of sitting in its own line.
+ *  - **Grouping is a hint, not a flag.** `x-canonical-private-synchronous`
+ *    makes a later notification replace an earlier one carrying the same key,
+ *    which is what `-group` buys on macOS. Servers that do not implement it
+ *    ignore it and simply stack — degraded, not broken.
+ *  - **`-A` implies `--wait`**, so notify-send BLOCKS until the notification is
+ *    clicked or dismissed, printing the chosen action. That is what makes
+ *    click-to-attach possible at all here, and it is also why the whole thing
+ *    is wrapped in `setsid ... &`: waiting inline would stall the collect tick
+ *    for as long as a banner sits unread.
+ */
+export function notifySendCommand(
+  content: NotificationContent,
+  attachCmd: string,
+): string {
+  const body = `${content.subtitle}\n${content.message}`;
+  const send = [
+    "notify-send",
+    "-a",
+    "claude-monitor",
+    "-u",
+    content.urgency,
+    "-h",
+    shellQuote(`string:x-canonical-private-synchronous:${content.group}`),
+    "-A",
+    "attach=Attach",
+    shellQuote(content.title),
+    shellQuote(body),
+  ].join(" ");
+  // `exec` on the tail so the detached shell becomes the attach rather than
+  // lingering as a second process per notification.
+  const script = `if [ "$(${send})" = attach ]; then exec ${attachCmd}; fi`;
+  return `setsid sh -c ${shellQuote(script)} </dev/null >/dev/null 2>&1 &`;
+}
+
+/** Builds this pane's notification content and shells out to whichever
+ *  notifier this platform has. No-ops (with a console warning) when neither is
+ *  installed. */
+export async function fireNotification(
+  record: SessionRecord,
+  pane: PaneRecord,
+  exec: Exec = execAsync,
+  platform: string = process.platform,
+): Promise<void> {
+  const content = buildNotificationContent(record, pane);
+  if (!content) return;
+
+  const notifier = await detectNotifier(exec, platform);
+  if (notifier === "none") {
+    console.error(
+      platform === "darwin"
+        ? "terminal-notifier not found on PATH - desktop notifications are disabled " +
+            "(install with `brew install terminal-notifier`)"
+        : "notify-send not found on PATH - desktop notifications are disabled " +
+            "(install libnotify-bin)",
+    );
+    return;
+  }
+
+  // tmuxName is a sanitised identifier by construction (see naming.ts), not
+  // free-form text, so it needs no quoting of its own - only the combined
+  // inner command needs one layer of quoting, for whichever flag carries it.
+  const attachCmd = `${ATTACH_BIN} ${record.tmuxName}`;
+  const cmd =
+    notifier === "terminal-notifier"
+      ? terminalNotifierCommand(content, attachCmd)
+      : notifySendCommand(content, attachCmd);
 
   await exec(cmd, 5000);
 }

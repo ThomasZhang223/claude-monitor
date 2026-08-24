@@ -4,6 +4,13 @@
   "notifications": false,
   "boxes": [
     { "id": "general", "label": "general", "color": "#C9A227", "path": null },
-    { "id": "app", "label": "app", "color": "#7FFFD4", "path": "/Users/me/code/app" }
+    { "id": "app", "label": "app", "color": "#7FFFD4", "path": "/Users/me/code/app" },
+    {
+      "id": "umbrella",
+      "label": "umbrella",
+      "color": "#87CEFA",
+      "path": "/Users/me/code/umbrella",
+      "worktreeRoot": "/Users/me/worktrees"
+    }
   ]
 }

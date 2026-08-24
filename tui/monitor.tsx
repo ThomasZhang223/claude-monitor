@@ -1107,6 +1107,10 @@ function SetupPanel({
       label: nameValue.trim(),
       color: PALETTE[colorIdx].hex,
       path: pathValue.trim() ? expandTilde(pathValue.trim()) : null,
+      // Carried through rather than re-entered: `worktreeRoot` is edited in
+      // config.json, not here, so rebuilding the box from the panel's four
+      // fields would silently drop it and start scattering worktrees again.
+      worktreeRoot: editIdx !== null ? config.boxes[editIdx]?.worktreeRoot ?? null : null,
     };
     const boxes = isAdd
       ? [...config.boxes, box]

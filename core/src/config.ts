@@ -107,7 +107,20 @@ export function validateConfig(raw: unknown): Config {
       boxPath = b.path;
     }
 
-    return { id: b.id, label: b.label, color: b.color, path: boxPath };
+    // A collection directory for this box's worktrees. Unlike `path` it is NOT
+    // required to exist — it is created on first use — so this validates the
+    // shape only, and rejects setting one on a box with no folder at all,
+    // where nothing would ever be created under it.
+    let worktreeRoot: string | null = null;
+    if (b.worktreeRoot !== undefined && b.worktreeRoot !== null) {
+      if (typeof b.worktreeRoot !== "string" || !path.isAbsolute(b.worktreeRoot)) {
+        fail(`boxes[${i}].worktreeRoot`, "must be null or an absolute path");
+      }
+      if (!boxPath) fail(`boxes[${i}].worktreeRoot`, "needs a path - this box has no folder");
+      worktreeRoot = b.worktreeRoot;
+    }
+
+    return { id: b.id, label: b.label, color: b.color, path: boxPath, worktreeRoot };
   });
 
   return {
@@ -156,7 +169,7 @@ export function defaultConfig(): Config {
     version: 1,
     branchPrefix: "cc",
     notifications: false,
-    boxes: [{ id: "general", label: "general", color: "#C9A227", path: null }],
+    boxes: [{ id: "general", label: "general", color: "#C9A227", path: null, worktreeRoot: null }],
   };
 }
 

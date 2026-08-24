@@ -13,9 +13,12 @@ set -euo pipefail
 # runs inherits launchd's PATH — /usr/bin:/bin:/usr/sbin:/sbin — where neither
 # `npx` nor `tmux` exists. The failure is silent, because -execute's output goes
 # nowhere a person will ever look: clicking the notification simply did nothing.
-# Both Homebrew prefixes are prepended (arm64 and Intel) rather than resolving a
+# On Linux the same hazard exists in a different shape: the notification action
+# runs in a shell detached from the dashboard, and a user-local node or claude
+# under ~/.local/bin is exactly what a minimal inherited PATH is missing. Both
+# Homebrew prefixes are prepended (arm64 and Intel) rather than resolving a
 # single absolute path, so this keeps working on either machine.
-export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH:-/usr/bin:/bin:/usr/sbin:/sbin}"
+export PATH="/opt/homebrew/bin:/usr/local/bin:${HOME}/.local/bin:${PATH:-/usr/bin:/bin:/usr/sbin:/sbin}"
 
 # Resolve through symlinks — this script is symlinked into ~/.local/bin, and the
 # repo it launches into lives next to the real file, not next to the link.

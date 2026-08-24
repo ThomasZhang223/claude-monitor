@@ -263,7 +263,7 @@ function fakeExec(handlers: Array<[RegExp, Partial<ExecResult>]> = []): Exec & {
 test("fireNotification: shells out with the expected flags and attach command", async () => {
   const exec = fakeExec([[/command -v terminal-notifier/, { stdout: "/usr/local/bin/terminal-notifier\n" }]]);
   const r = record();
-  await fireNotification(r, pane(1, "permission"), exec);
+  await fireNotification(r, pane(1, "permission"), exec, "darwin");
   const call = exec.calls.find((c) => c.startsWith("terminal-notifier"));
   assert.ok(call, "called terminal-notifier");
   assert.match(call!, /-title 'Needs Permission — implement'/);
@@ -286,7 +286,7 @@ test("fireNotification: passes no flag terminal-notifier does not implement", as
     "-open", "-execute", "-ignoreDnD",
   ]);
   const exec = fakeExec([[/command -v terminal-notifier/, { stdout: "/usr/local/bin/terminal-notifier\n" }]]);
-  await fireNotification(record(), pane(1, "permission"), exec);
+  await fireNotification(record(), pane(1, "permission"), exec, "darwin");
   const call = exec.calls.find((c) => c.startsWith("terminal-notifier"));
   assert.ok(call, "called terminal-notifier");
 
@@ -303,8 +303,45 @@ test("fireNotification: passes no flag terminal-notifier does not implement", as
 
 test("fireNotification: no-ops when terminal-notifier is missing", async () => {
   const exec = fakeExec([[/command -v terminal-notifier/, { ok: false, stdout: "" }]]);
-  await fireNotification(record(), pane(1, "permission"), exec);
+  await fireNotification(record(), pane(1, "permission"), exec, "darwin");
   assert.ok(!exec.calls.some((c) => c.startsWith("terminal-notifier")));
+});
+
+test("fireNotification: Linux fires notify-send, never terminal-notifier", async () => {
+  const exec = fakeExec([[/command -v notify-send/, { stdout: "/usr/bin/notify-send\n" }]]);
+  const r = record();
+  await fireNotification(r, pane(1, "permission"), exec, "linux");
+  const call = exec.calls.find((c) => c.startsWith("setsid"));
+  assert.ok(call, "called notify-send");
+  assert.ok(!exec.calls.some((c) => c.includes("terminal-notifier")), "no macOS binary probed");
+  assert.match(call!, /-u critical/, "a permission prompt stalls work outright");
+  assert.match(call!, /'Needs Permission — implement'/);
+  assert.match(call!, new RegExp(`x-canonical-private-synchronous:${r.tmuxName}:1`));
+  assert.match(call!, new RegExp(`bin/monitor-attach ${r.tmuxName}`));
+});
+
+test("fireNotification: the notify-send wait is detached, not inline", async () => {
+  // `-A` implies --wait, so notify-send blocks until the banner is dismissed.
+  // Run inline that would stall the collect tick for as long as it sits unread.
+  const exec = fakeExec([[/command -v notify-send/, { stdout: "/usr/bin/notify-send\n" }]]);
+  await fireNotification(record(), pane(1, "awaiting"), exec, "linux");
+  const call = exec.calls.find((c) => c.startsWith("setsid"))!;
+  assert.match(call, /^setsid sh -c /, "own session - outlives the dashboard");
+  assert.match(call, /&$/);
+});
+
+test("fireNotification: notify-send urgency is spent only where it is warranted", async () => {
+  // `critical` never auto-dismisses on GNOME, so every status being critical
+  // would leave a wall of banners to clear by hand.
+  const exec = fakeExec([[/command -v notify-send/, { stdout: "/usr/bin/notify-send\n" }]]);
+  await fireNotification(record(), pane(1, "awaiting"), exec, "linux");
+  assert.match(exec.calls.find((c) => c.startsWith("setsid"))!, /-u normal/);
+});
+
+test("fireNotification: no-ops when notify-send is missing", async () => {
+  const exec = fakeExec([[/command -v notify-send/, { ok: false, stdout: "" }]]);
+  await fireNotification(record(), pane(1, "permission"), exec, "linux");
+  assert.ok(!exec.calls.some((c) => c.includes("setsid")));
 });
 
 test("fireNotification: does nothing at all for a non-notify status", async () => {

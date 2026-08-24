@@ -17,12 +17,21 @@ export function branchFor(slug: string, branchPrefix: string): string {
   return `${branchPrefix}/${slug}`;
 }
 
-/** Worktrees live beside the box's own folder, as `<folder>_<slug>` — the
- *  same sibling-of-the-checkout placement the tool always used, minus the
- *  global root: each box supplies its own parent directory now. */
+/**
+ * Where a new worktree for this box goes: `<root>/<folder-name>_<slug>`.
+ *
+ * The root defaults to the box folder's own parent — the sibling-of-the-checkout
+ * placement the tool always used. That default is wrong whenever the folder's
+ * siblings are not scratch space: an umbrella checkout sits among the other
+ * repos it coordinates, and a box on `~/src` would drop worktrees straight into
+ * the home directory. `worktreeRoot` names a directory to collect them in
+ * instead, which is also how a shop with a house convention (`~/worktrees`)
+ * gets its worktrees where the rest of its tooling expects them.
+ */
 export function worktreePathFor(box: BoxDef, slug: string): string | null {
   if (!box.path) return null;
-  return path.join(path.dirname(box.path), `${path.basename(box.path)}_${slug}`);
+  const root = box.worktreeRoot ?? path.dirname(box.path);
+  return path.join(root, `${path.basename(box.path)}_${slug}`);
 }
 
 /** Is this folder a git repository at all? The setup panel's live path
@@ -57,10 +66,18 @@ export function currentBranchCommand(repo: string): string {
   return `git -C ${shellQuote(repo)} branch --show-current`;
 }
 
-/** New worktrees branch from `origin/main`, not local HEAD, so a stale primary
- *  cannot silently seed a session with old code. */
+/**
+ * New worktrees branch from `origin/main`, not local HEAD, so a stale primary
+ * cannot silently seed a session with old code.
+ *
+ * The `mkdir -p` is for a `worktreeRoot` that does not exist yet: `git worktree
+ * add` creates the leaf directory but not the path above it, so a first run
+ * against a fresh collection directory would otherwise fail on nothing worse
+ * than an absent folder.
+ */
 export function worktreeAddCommand(repo: string, branch: string, target: string): string {
-  return `git -C ${shellQuote(repo)} worktree add -b ${shellQuote(branch)} ${shellQuote(target)} origin/main`;
+  const parent = shellQuote(path.dirname(target));
+  return `mkdir -p ${parent} && git -C ${shellQuote(repo)} worktree add -b ${shellQuote(branch)} ${shellQuote(target)} origin/main`;
 }
 
 export function worktreeListCommand(repo: string): string {

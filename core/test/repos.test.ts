@@ -214,3 +214,24 @@ test("isGitRepo / isGitCapable: false for a plain folder, and for no folder at a
 test("isGitRepo: a nonexistent path is false, not a thrown error", () => {
   assert.equal(isGitRepo("/no/such/directory/at/all"), false);
 });
+
+test("worktreePathFor: worktreeRoot collects worktrees instead of scattering siblings", () => {
+  // The default drops them beside the box folder. For an umbrella checkout
+  // that is among the other repos it coordinates, and for a box on ~/src it is
+  // the home directory itself.
+  const box = { ...ALPHA, path: "/home/me/repos", worktreeRoot: "/home/me/worktrees" };
+  assert.equal(worktreePathFor(box, "plt1836"), "/home/me/worktrees/repos_plt1836");
+});
+
+test("worktreePathFor: an absent worktreeRoot keeps the sibling default", () => {
+  const box = { ...ALPHA, worktreeRoot: null };
+  assert.equal(worktreePathFor(box, "x"), path.join(path.dirname(ALPHA.path!), "alpha_x"));
+});
+
+test("worktreeAddCommand: creates the root before git needs it", () => {
+  // `git worktree add` makes the leaf directory but not the path above it, so
+  // the first session in a box with a fresh worktreeRoot would otherwise fail
+  // on nothing worse than an absent folder.
+  const cmd = worktreeAddCommand("/repo", "cc/x", "/home/me/worktrees/repos_x");
+  assert.match(cmd, /^mkdir -p '\/home\/me\/worktrees' && git -C/);
+});

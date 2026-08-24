@@ -22,7 +22,7 @@ function validConfig(overrides: Partial<Config> = {}): Config {
     version: 1,
     branchPrefix: "cc",
     notifications: false,
-    boxes: [{ id: "alpha", label: "Alpha", color: "#7FFFD4", path: null }],
+    boxes: [{ id: "alpha", label: "Alpha", color: "#7FFFD4", path: null, worktreeRoot: null }],
     ...overrides,
   };
 }
@@ -133,7 +133,7 @@ test("validateConfig: path must be null or an absolute, existing directory", () 
 
 test("saveConfig / loadConfig / configExists: round-trip through a temp file", () => {
   const p = tmpConfigPath();
-  const cfg = validConfig({ boxes: [{ id: "b", label: "B", color: "#87CEFA", path: null }] });
+  const cfg = validConfig({ boxes: [{ id: "b", label: "B", color: "#87CEFA", path: null, worktreeRoot: null }] });
   saveConfig(cfg, p);
   assert.deepEqual(loadConfig(p), cfg);
 });
@@ -167,4 +167,38 @@ test("sanitizeBoxId: strips everything but [a-z0-9], never hyphenates", () => {
   assert.equal(sanitizeBoxId("café spike"), "cafespike");
   assert.equal(sanitizeBoxId("###"), "");
   assert.equal(sanitizeBoxId("a".repeat(20)), "a".repeat(12));
+});
+
+test("validateConfig: worktreeRoot is optional, and absent normalises to null", () => {
+  // Every config written before this field existed omits it entirely.
+  const cfg = validConfig();
+  delete (cfg.boxes[0] as unknown as Record<string, unknown>).worktreeRoot;
+  assert.equal(validateConfig(cfg).boxes[0].worktreeRoot, null);
+});
+
+test("validateConfig: worktreeRoot must be absolute", () => {
+  const cfg = validConfig({
+    boxes: [{ id: "a", label: "A", color: "#7FFFD4", path: os.tmpdir(), worktreeRoot: "worktrees" }],
+  });
+  assert.throws(() => validateConfig(cfg), /worktreeRoot must be null or an absolute path/);
+});
+
+test("validateConfig: worktreeRoot needs a folder to be a root FOR", () => {
+  // A pathless box never creates a worktree, so a root on one is a config the
+  // author has misunderstood - worth saying so rather than accepting silently.
+  const cfg = validConfig({
+    boxes: [{ id: "a", label: "A", color: "#7FFFD4", path: null, worktreeRoot: "/tmp/wt" }],
+  });
+  assert.throws(() => validateConfig(cfg), /worktreeRoot needs a path/);
+});
+
+test("validateConfig: worktreeRoot need not exist yet", () => {
+  // Unlike `path`, it is created on first use - requiring it up front would
+  // make the very first session in a new box fail on an absent directory.
+  const cfg = validConfig({
+    boxes: [
+      { id: "a", label: "A", color: "#7FFFD4", path: os.tmpdir(), worktreeRoot: "/nonexistent/wt" },
+    ],
+  });
+  assert.equal(validateConfig(cfg).boxes[0].worktreeRoot, "/nonexistent/wt");
 });

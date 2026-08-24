@@ -27,8 +27,19 @@ so it lives in none of them.
 - `tmux` — sessions are real tmux sessions; the dashboard is a view over them.
 - `node` (18+) and `claude` (Claude Code) on `PATH`.
 - `git`, for any box you point at a repository. A box with no folder needs none.
-- Optional: `terminal-notifier` (`brew install terminal-notifier`) for desktop
-  notifications, and `jq` for the plan-handoff hook. Both fail open if missing.
+- Optional: a notifier for desktop notifications — `terminal-notifier`
+  (`brew install terminal-notifier`) on macOS, `notify-send`
+  (`apt install libnotify-bin`) on Linux; `jq` for the plan-handoff hook; and
+  on Linux `xdotool`, which lets `⏎` raise a session's existing window instead
+  of only reporting that one is open. All of them fail open if missing.
+- macOS and Linux are both supported. On Linux, `⏎` opens a window in the first
+  emulator it finds on `PATH` (ghostty, WezTerm, kitty, Alacritty,
+  gnome-terminal, Konsole, xfce4-terminal, xterm, `x-terminal-emulator`), and
+  `$CLAUDE_MONITOR_TERMINAL` names one explicitly or gives a full command
+  template containing `{}` for an emulator that table has never heard of.
+  Wayland has not been tried: `xdotool` is X11-only, so there `⏎` declines to
+  raise an already-open window rather than opening a duplicate, which would
+  shrink the session for both clients.
 
 ## Install
 
@@ -103,7 +114,14 @@ is gitignored; `config.example.json` documents the shape:
   "notifications": false,
   "boxes": [
     { "id": "general", "label": "general", "color": "#C9A227", "path": null },
-    { "id": "app",     "label": "app",     "color": "#7FFFD4", "path": "/Users/me/code/app" }
+    { "id": "app",     "label": "app",     "color": "#7FFFD4", "path": "/Users/me/code/app" },
+    {
+      "id": "umbrella",
+      "label": "umbrella",
+      "color": "#87CEFA",
+      "path": "/Users/me/code/umbrella",
+      "worktreeRoot": "/Users/me/worktrees"
+    }
   ]
 }
 ```
@@ -116,6 +134,13 @@ is gitignored; `config.example.json` documents the shape:
 - `path` — an absolute path to an existing directory, or `null` for a
   catch-all box with no folder. A box whose folder is a git repository gets
   worktree support automatically; a plain folder does not.
+- `worktreeRoot` — optional, an absolute directory to collect this box's
+  worktrees in. Worktrees default to a sibling of the box's folder
+  (`<folder>_<slug>`), which is wrong whenever those siblings must not be
+  polluted: an umbrella checkout sits among the repos it coordinates, and a box
+  on `~/src` would drop worktrees straight into your home directory. The
+  directory is created on first use. Edit it in `config.json`, not in the setup
+  panel — the panel carries the existing value through rather than dropping it.
 
 Everything else (whether a box is git-capable, a session's worktree path, its
 branch) is derived at use time from `path`, never stored, so nothing here can
@@ -177,7 +202,7 @@ keep seeing your own.
 |---|---|
 | `↑↓` / `j k` | Move within the selected box |
 | `←→` / `h l` | Move between boxes |
-| `⏎` | Open the cursor's session in a new terminal window |
+| `⏎` | Open the cursor's session in a new terminal window (raises it if already open) |
 | `a` | Attach in place (gives up the dashboard's own terminal until you detach) |
 | `n` | New session in the selected box (class picker first) |
 | `N` | New QUESTIONS session, straight to naming |

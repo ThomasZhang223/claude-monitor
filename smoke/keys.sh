@@ -97,16 +97,19 @@ goto_box() {
 	return 1
 }
 
-# Close a Terminal window by tty, detaching tmux from it first.
+# Close the terminal window on this tty, detaching tmux from it first.
 #
-# Order matters: Terminal prompts "terminate running processes?" when a window
-# has anything but a shell in it, and that dialog is modal - it blocks osascript
-# forever, which hung a whole smoke run. After a detach the window holds only its
-# shell, so it closes silently.
+# The detach is the whole job on Linux, where the window runs `exec tmux attach`
+# and so exits with it. macOS needs the second half: Terminal.app outlives the
+# command it was given, and it prompts "terminate running processes?" when a
+# window holds anything but a shell - a modal dialog that blocks osascript
+# forever, and once hung a whole smoke run. Detaching first leaves only the
+# shell, so the close is silent.
 close_window() {
 	[ -n "${1:-}" ] || return 0
 	tmux detach-client -t "$1" 2>/dev/null
 	sleep 1
+	[ "$(uname -s)" = "Darwin" ] || return 0
 	osascript -e "tell application \"Terminal\" to close (every window whose tty of its selected tab is \"$1\")" >/dev/null 2>&1
 }
 

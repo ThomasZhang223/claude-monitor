@@ -56,6 +56,11 @@ export interface BoxDef {
   /** Absolute path to the folder this box points at, or null for a catch-all
    *  box with no folder behind it. */
   path: string | null;
+  /** Absolute directory new worktrees are created under, or null for the
+   *  default: beside the box's own folder. Set this when the box's folder has
+   *  siblings that must not be polluted — an umbrella checkout whose siblings
+   *  are other repos, or a home directory. */
+  worktreeRoot?: string | null;
 }
 
 /** The preview box's border. White, distinct from every box colour. */
