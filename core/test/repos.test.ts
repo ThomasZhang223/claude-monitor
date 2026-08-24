@@ -15,6 +15,8 @@ import {
   parseWorktreeList,
   worktreeAddCommand,
   worktreePathFor,
+  worktreeCollectionDir,
+  worktreeFolderProblem,
   worktreeRootProblem,
   worktreeRootWritable,
   defaultWorktreeRoot,
@@ -326,4 +328,79 @@ test("defaultWorktreeRoot: what it returns is always a root worktreePathFor acce
   const root = defaultWorktreeRoot(boxPath, probe);
   const box = { ...ALPHA, path: boxPath, worktreeRoot: null };
   assert.equal(worktreePathFor(box, "x"), worktreePathFor({ ...box, worktreeRoot: root }, "x"));
+});
+
+// ---------------------------------------------------------------------------
+// Worktree collection folder
+// ---------------------------------------------------------------------------
+
+const DUCK = {
+  ...ALPHA,
+  path: "/calder/duck",
+  worktreeRoot: "/calder",
+  worktreeFolder: "duck_worktrees",
+};
+
+test("worktreeCollectionDir: root plus folder is where worktrees collect", () => {
+  assert.equal(worktreeCollectionDir(DUCK), "/calder/duck_worktrees");
+});
+
+test("worktreePathFor: the worktree lands inside the named folder", () => {
+  assert.equal(worktreePathFor(DUCK, "plt1836"), "/calder/duck_worktrees/duck_plt1836");
+});
+
+test("worktreePathFor: the leaf keeps its box prefix inside a dedicated folder", () => {
+  // Mildly redundant for one box, and it is what lets two boxes share a
+  // collection folder without colliding on a slug they both use.
+  const goose = { ...DUCK, path: "/calder/goose" };
+  assert.equal(worktreePathFor(goose, "plt1836"), "/calder/duck_worktrees/goose_plt1836");
+  assert.notEqual(worktreePathFor(goose, "plt1836"), worktreePathFor(DUCK, "plt1836"));
+});
+
+test("worktreeCollectionDir: no folder collects straight in the root", () => {
+  // Every config written before the folder field existed means exactly this,
+  // so it has to keep behaving the way it did.
+  assert.equal(worktreeCollectionDir({ ...DUCK, worktreeFolder: null }), "/calder");
+  assert.equal(worktreePathFor({ ...DUCK, worktreeFolder: null }, "x"), "/calder/duck_x");
+});
+
+test("worktreeCollectionDir: no root at all falls back to the box folder's parent", () => {
+  const bare = { ...DUCK, worktreeRoot: null, worktreeFolder: null };
+  assert.equal(worktreeCollectionDir(bare), "/calder");
+});
+
+test("worktreeCollectionDir: a folder with no root hangs off the parent default", () => {
+  assert.equal(worktreeCollectionDir({ ...DUCK, worktreeRoot: null }), "/calder/duck_worktrees");
+});
+
+test("worktreeCollectionDir: a box with no folder has nowhere to collect", () => {
+  assert.equal(worktreeCollectionDir(GENERAL), null);
+});
+
+test("worktreeFolderProblem: one folder name, never a path", () => {
+  // A separator would let the folder climb out of the root the author chose,
+  // which would make the root field a suggestion rather than a boundary.
+  assert.equal(worktreeFolderProblem("duck_worktrees"), null);
+  assert.match(worktreeFolderProblem("a/b") ?? "", /not a path/);
+  assert.match(worktreeFolderProblem("../escape") ?? "", /not a path/);
+  assert.match(worktreeFolderProblem("..") ?? "", /real folder name/);
+  assert.match(worktreeFolderProblem(".") ?? "", /real folder name/);
+  assert.match(worktreeFolderProblem("") ?? "", /blank/);
+  assert.match(worktreeFolderProblem(" pad ") ?? "", /space/);
+});
+
+test("worktreeAddCommand: the branch is cut from the box dir, not from the collection folder", () => {
+  // The repo git operates on stays the box's own checkout. Only the target
+  // moves, so a collection folder cannot change what the branch forks from.
+  const target = worktreePathFor(DUCK, "plt1836")!;
+  const cmd = worktreeAddCommand(DUCK.path!, branchFor("plt1836", PREFIX), target);
+  assert.match(cmd, /git -C '\/calder\/duck' worktree add/);
+  assert.match(cmd, /-b 'cc\/plt1836'/);
+  assert.match(cmd, /origin\/main$/);
+});
+
+test("worktreeAddCommand: the collection folder is created before git needs it", () => {
+  const target = worktreePathFor(DUCK, "plt1836")!;
+  const cmd = worktreeAddCommand(DUCK.path!, "cc/plt1836", target);
+  assert.match(cmd, /^mkdir -p '\/calder\/duck_worktrees' && /);
 });

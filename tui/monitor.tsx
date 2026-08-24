@@ -86,6 +86,7 @@ import {
   isGitCapable,
   isGitRepo,
   worktreePathFor,
+  worktreeFolderProblem,
   worktreeRootProblem,
   worktreeRootWritable,
 } from "../core/src/repos.ts";
@@ -998,7 +999,7 @@ function Wizard({
 // required to advance, Enter takes the current value, Escape backs out.
 // ---------------------------------------------------------------------------
 
-type SetupStep = "list" | "path" | "wtroot" | "name" | "color";
+type SetupStep = "list" | "path" | "wtroot" | "wtfolder" | "name" | "color";
 
 /** Rows each step needs — see wizardRows's header for why this is declared
  *  rather than measured. */
@@ -1009,9 +1010,9 @@ export function setupRows(step: SetupStep): number {
   // color: border 2, title, blank, grid label, PALETTE_ROWS rows, selected
   //        name line, blank, keys = 15.
   if (step === "color") return 2 + 1 + 1 + 1 + PALETTE_ROWS + 1 + 1 + 1;
-  // path / wtroot / name: border 2, title, blank, field, blank, status/error
-  //                       line, blank, keys = 9. The three are one shape, so
-  //                       adding the worktree root cost no height.
+  // path / wtroot / wtfolder / name: border 2, title, blank, field, blank,
+  //   status/error line, blank, keys = 9. All four are one shape, so the
+  //   worktree steps cost no height.
   return 9;
 }
 
@@ -1056,6 +1057,17 @@ function wtrootStatus(raw: string, boxPath: string): { text: string; blocked: bo
   return { text: `worktrees collect in ${resolved}`, blocked: false, warn: false };
 }
 
+/** Live validation for the worktree-folder step. Empty is legal and means "no
+ *  dedicated folder, collect straight in the root" — which is what every config
+ *  written before this field existed does, so the step can always be skipped. */
+function wtfolderStatus(raw: string, collectRoot: string): { text: string; blocked: boolean } {
+  const trimmed = raw.trim();
+  if (trimmed === "") return { text: "empty: worktrees collect straight in the root", blocked: false };
+  const problem = worktreeFolderProblem(raw.trim());
+  if (problem) return { text: `the folder name ${problem}`, blocked: true };
+  return { text: `worktrees collect in ${path.join(collectRoot, trimmed)}`, blocked: false };
+}
+
 function pathIsValid(raw: string): boolean {
   const trimmed = raw.trim();
   if (trimmed === "") return true;
@@ -1095,6 +1107,7 @@ function SetupPanel({
   const [editIdx, setEditIdx] = useState<number | null>(null);
   const [pathValue, setPathValue] = useState("");
   const [wtrootValue, setWtrootValue] = useState("");
+  const [wtfolderValue, setWtfolderValue] = useState("");
   const [nameValue, setNameValue] = useState("");
   const [colorIdx, setColorIdx] = useState(0);
   const [prefixEdit, setPrefixEdit] = useState<string | null>(null);
@@ -1107,6 +1120,7 @@ function SetupPanel({
     setEditIdx(null);
     setPathValue("");
     setWtrootValue("");
+    setWtfolderValue("");
     setNameValue("");
     const defaultColor = firstUnusedColor(config.boxes);
     setColorIdx(Math.max(0, PALETTE.findIndex((c) => c.hex === defaultColor)));
@@ -1123,6 +1137,7 @@ function SetupPanel({
     // rather than an empty field is what makes the step readable as "here is
     // the current placement, change it if you want".
     setWtrootValue(b.worktreeRoot ?? defaultWorktreeRoot(b.path) ?? "");
+    setWtfolderValue(b.worktreeFolder ?? "");
     setNameValue(b.label);
     setColorIdx(Math.max(0, PALETTE.findIndex((c) => c.hex === b.color)));
     setError(null);
@@ -1133,6 +1148,13 @@ function SetupPanel({
   // there is no saved box yet, and on an edit the path may have just changed.
   const wtroot = wtrootStatus(wtrootValue, pathValue.trim() ? expandTilde(pathValue.trim()) : "");
   const wtrootBlocked = wtroot.blocked;
+  // Where the named folder would be created. Mirrors the fallback chain in
+  // `worktreeCollectionDir`: an empty root step still has the parent default
+  // behind it, so the preview stays truthful rather than showing a bare name.
+  const collectRoot = wtrootValue.trim()
+    ? expandTilde(wtrootValue.trim())
+    : defaultWorktreeRoot(pathValue.trim() ? expandTilde(pathValue.trim()) : null) ?? "";
+  const wtfolder = wtfolderStatus(wtfolderValue, collectRoot);
 
   const idPreview = isAdd ? sanitizeBoxId(nameValue) : config.boxes[editIdx ?? 0]?.id ?? "";
   const nameIsValid = isAdd
@@ -1141,7 +1163,7 @@ function SetupPanel({
 
   const commitBox = () => {
     const boxPath = pathValue.trim() ? expandTilde(pathValue.trim()) : null;
-    const wtroot = wtrootValue.trim() ? expandTilde(wtrootValue.trim()) : null;
+    const wtrootPath = wtrootValue.trim() ? expandTilde(wtrootValue.trim()) : null;
     const box: BoxDef = {
       id: idPreview,
       label: nameValue.trim(),
@@ -1152,7 +1174,10 @@ function SetupPanel({
       // twice. This is also what keeps Enter-through on an existing box from
       // rewriting config.json with a redundant field. A box with no folder can
       // hold no root at all - `validateConfig` rejects that pairing.
-      worktreeRoot: wtroot && boxPath && wtroot !== path.dirname(boxPath) ? wtroot : null,
+      worktreeRoot: wtrootPath && boxPath && wtrootPath !== path.dirname(boxPath) ? wtrootPath : null,
+      // A blank name means no dedicated folder, which is what a config written
+      // before this field existed already says.
+      worktreeFolder: boxPath && wtfolderValue.trim() ? wtfolderValue.trim() : null,
     };
     const boxes = isAdd
       ? [...config.boxes, box]
@@ -1273,7 +1298,12 @@ function SetupPanel({
     if (step === "wtroot") {
       if (key.return) {
         if (wtrootBlocked) return;
-        setStep("name");
+        // Seed the folder name from the box folder, which is the shape the
+        // convention takes: a `duck` box collects in `duck_worktrees`.
+        if (wtfolderValue.trim() === "" && pathValue.trim()) {
+          setWtfolderValue(`${path.basename(expandTilde(pathValue.trim()))}_worktrees`);
+        }
+        setStep("wtfolder");
         return;
       }
       if (key.backspace || key.delete) {
@@ -1288,6 +1318,24 @@ function SetupPanel({
       return;
     }
 
+    if (step === "wtfolder") {
+      if (key.return) {
+        if (wtfolder.blocked) return;
+        setStep("name");
+        return;
+      }
+      if (key.backspace || key.delete) {
+        if (wtfolderValue === "") {
+          setStep("wtroot");
+          return;
+        }
+        setWtfolderValue((v) => v.slice(0, -1));
+        return;
+      }
+      if (input && input >= " ") setWtfolderValue((v) => (v + input).slice(0, 60));
+      return;
+    }
+
     if (step === "name") {
       if (key.return) {
         if (!nameIsValid) return;
@@ -1296,7 +1344,7 @@ function SetupPanel({
       }
       if (key.backspace || key.delete) {
         if (nameValue === "") {
-          setStep(pathValue.trim() ? "wtroot" : "path");
+          setStep(pathValue.trim() ? "wtfolder" : "path");
           return;
         }
         setNameValue((v) => v.slice(0, -1));
@@ -1414,8 +1462,24 @@ function SetupPanel({
     >
       <Text bold>{`${isAdd ? "add box" : `edit ${config.boxes[editIdx ?? 0]?.label}`}`}</Text>
       <Box marginTop={1}>
-        <Text>{step === "path" ? "path    " : step === "wtroot" ? "wtroot  " : "name    "}</Text>
-        <Text>{step === "path" ? pathValue : step === "wtroot" ? wtrootValue : nameValue}</Text>
+        <Text>
+          {step === "path"
+            ? "path      "
+            : step === "wtroot"
+              ? "wtroot    "
+              : step === "wtfolder"
+                ? "wtfolder  "
+                : "name      "}
+        </Text>
+        <Text>
+          {step === "path"
+            ? pathValue
+            : step === "wtroot"
+              ? wtrootValue
+              : step === "wtfolder"
+                ? wtfolderValue
+                : nameValue}
+        </Text>
         <Text inverse> </Text>
       </Box>
       <Box marginTop={1} flexDirection="column">
@@ -1429,6 +1493,10 @@ function SetupPanel({
             color={wtroot.blocked ? "red" : wtroot.warn ? "yellow" : undefined}
           >
             {wtroot.text}
+          </Text>
+        ) : step === "wtfolder" ? (
+          <Text dimColor={!wtfolder.blocked} color={wtfolder.blocked ? "red" : undefined}>
+            {wtfolder.text}
           </Text>
         ) : (
           <>

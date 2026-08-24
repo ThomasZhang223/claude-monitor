@@ -10,7 +10,8 @@
       "label": "umbrella",
       "color": "#87CEFA",
       "path": "/Users/me/code/umbrella",
-      "worktreeRoot": "/Users/me/worktrees"
+      "worktreeRoot": "/Users/me",
+      "worktreeFolder": "umbrella_worktrees"
     }
   ]
 }
