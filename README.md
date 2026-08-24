@@ -24,38 +24,152 @@ so it lives in none of them.
 
 ## Prerequisites
 
-- `tmux` — sessions are real tmux sessions; the dashboard is a view over them.
-- `node` (18+) and `claude` (Claude Code) on `PATH`.
-- `git`, for any box you point at a repository. A box with no folder needs none.
-- Optional: a notifier for desktop notifications — `terminal-notifier`
-  (`brew install terminal-notifier`) on macOS, `notify-send`
-  (`apt install libnotify-bin`) on Linux; `jq` for the plan-handoff hook; and
-  on Linux `xdotool`, which lets `⏎` raise a session's existing window instead
-  of only reporting that one is open. All of them fail open if missing.
-- macOS and Linux are both supported. On Linux, `⏎` opens a window in the first
-  emulator it finds on `PATH` (ghostty, WezTerm, kitty, Alacritty,
-  gnome-terminal, Konsole, xfce4-terminal, xterm, `x-terminal-emulator`), and
-  `$CLAUDE_MONITOR_TERMINAL` names one explicitly or gives a full command
-  template containing `{}` for an emulator that table has never heard of.
-  Wayland has not been tried: `xdotool` is X11-only, so there `⏎` declines to
-  raise an already-open window rather than opening a duplicate, which would
-  shrink the session for both clients.
+Required on every platform:
+
+| Tool | Why |
+|---|---|
+| `tmux` | Sessions are real tmux sessions. The dashboard is a view over them. |
+| `node` 18+ | The dashboard runs on `tsx`, with no build step. |
+| `claude` | Claude Code itself, on `PATH`. |
+| `git` | Needed for any box you point at a repository. A box with no folder needs none. |
+
+Optional. Each one fails open, so a missing one degrades a single feature and
+never breaks the dashboard:
+
+| Tool | What it buys |
+|---|---|
+| `jq` | The plan-handoff hook. Without it, an approved plan does not cross to the implementation pane. |
+| `terminal-notifier` (macOS) | Desktop notifications. |
+| `notify-send` (Linux) | Desktop notifications. |
+| `xdotool` (Linux) | Lets `⏎` raise a session's existing window. Without it, `⏎` reports that one is already open and opens nothing. |
+
+## Platform support
+
+**macOS and Linux are supported.** Windows is supported through WSL2 only.
+
+- **macOS.** `⏎` opens a window in Terminal.app, and raises an existing one by
+  tty. This is the platform the tool was written on.
+- **Linux.** Verified on GNOME/X11. `⏎` opens a window in the first emulator it
+  finds on `PATH`: ghostty, WezTerm, kitty, Alacritty, gnome-terminal, Konsole,
+  xfce4-terminal, xterm, then `x-terminal-emulator`. The order is preference,
+  not `PATH` order. `$CLAUDE_MONITOR_TERMINAL` names one explicitly, or gives a
+  full command template containing `{}` for an emulator that list has never
+  heard of.
+  - Wayland is untried. `xdotool` is X11-only, so under Wayland `⏎` declines to
+    raise an already-open window rather than opening a duplicate. A second tmux
+    client would clamp the session to the smaller window for both.
+- **Windows, through WSL2.** Inside WSL2 this is a Linux box, so the Linux
+  instructions below apply unchanged. See the WSL2 notes for the one setting
+  that needs adding. This route is reasoned from the code rather than tested:
+  the Linux support it rests on was verified on real hardware, but nobody has
+  yet run the dashboard inside WSL2. Treat it as untested until someone does.
+- **Native Windows is not supported, and is not a small gap.** tmux is the
+  state store and has no native Windows build; all 18 shell-out sites compose
+  commands for a POSIX shell, with quoting that `cmd.exe` reads as literal
+  characters; and the six entry points and hooks are bash scripts. Running any
+  of it outside a POSIX environment would mean rewriting the shell layer, not
+  adding a branch.
 
 ## Install
 
+The install is the same on macOS, Linux, and WSL2. Only the prerequisites and
+the shell file you write `PATH` into differ, so those are split out below.
+
+### 1. Clone
+
 ```sh
-git clone <this-repo> ~/claude-monitor
-ln -s ~/claude-monitor/bin/monitor ~/.local/bin/monitor
-ln -s ~/claude-monitor/bin/monitor-attach ~/.local/bin/monitor-attach
-ln -s ~/claude-monitor/bin/cc-recap ~/.local/bin/cc-recap
+git clone https://github.com/ThomasZhang223/claude-monitor.git ~/claude-monitor
 ```
 
-The symlink name is yours to choose — if you already have a `monitor` on
-`PATH`, link these under a different name instead. Nothing in the repo assumes
-the command is called `monitor`; only the `bin/` filenames and the
+### 2. Install the prerequisites
+
+**macOS**
+
+```sh
+brew install tmux node git jq terminal-notifier
+```
+
+**Linux (Debian/Ubuntu) and WSL2**
+
+```sh
+sudo apt update
+sudo apt install -y tmux nodejs git jq libnotify-bin xdotool
+```
+
+Check the node version before you go on. Older Ubuntu releases package a
+`nodejs` below the 18 minimum, and you need a newer one from NodeSource or a
+version manager if `node --version` comes back under 18.
+
+Install `claude` itself by whichever route you already use. Check every
+prerequisite resolved:
+
+```sh
+for b in tmux node git claude; do command -v "$b" || echo "MISSING: $b"; done
+```
+
+### 3. Symlink the three entry points
+
+`~/.local/bin` may not exist yet, and `ln` will not create it:
+
+```sh
+mkdir -p ~/.local/bin
+ln -s ~/claude-monitor/bin/monitor        ~/.local/bin/monitor
+ln -s ~/claude-monitor/bin/monitor-attach ~/.local/bin/monitor-attach
+ln -s ~/claude-monitor/bin/cc-recap       ~/.local/bin/cc-recap
+```
+
+The symlink name is yours to choose. If you already have a `monitor` on `PATH`,
+link these under a different name instead. Nothing in the repo assumes the
+command is called `monitor`. Only the `bin/` filenames and the
 `~/.local/share/claude-monitor` state directory are fixed.
 
-Make sure `~/.local/bin` (or wherever you linked to) is on `PATH`.
+Keep `monitor-attach` linked even if you never run it by hand. Clicking a
+desktop notification runs it.
+
+### 4. Put `~/.local/bin` on `PATH`
+
+**macOS** — zsh is the default shell:
+
+```sh
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+**Linux and WSL2** — bash is the usual default:
+
+```sh
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+If your shell is neither, write the same `export` line into its own startup
+file. Confirm it took:
+
+```sh
+command -v monitor
+```
+
+### 5. WSL2 only: name a terminal for `⏎`
+
+A WSL2 box usually has none of the nine Linux emulators installed, so `⏎`
+reports that it cannot open a window and points you at `a` to attach in place.
+Everything else works without this step.
+
+To make `⏎` open a real Windows Terminal window, give it a command template.
+The `{}` is replaced with the shell-quoted attach command:
+
+```sh
+echo "export CLAUDE_MONITOR_TERMINAL='wt.exe wsl.exe -- sh -c {}'" >> ~/.bashrc
+source ~/.bashrc
+```
+
+Two WSL2 limits worth knowing before you rely on it:
+
+- `xdotool` cannot see a Windows window, so `⏎` on a session that is already
+  open reports "already open in another window" instead of raising it.
+- Desktop notifications need a notification daemon inside WSL2. Without one,
+  `notify-send` is missing or silent, and the dashboard says so once and
+  carries on.
 
 ## First run
 
