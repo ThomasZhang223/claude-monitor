@@ -34,6 +34,99 @@ export function worktreePathFor(box: BoxDef, slug: string): string | null {
   return path.join(root, `${path.basename(box.path)}_${slug}`);
 }
 
+/**
+ * Why this directory cannot be a worktree root, or null if it can.
+ *
+ * Structural only: it asks the filesystem nothing, so a config that loads on
+ * one machine loads on every machine. `validateConfig` and the setup panel's
+ * live field both call this, so neither can contradict the other — the panel
+ * showing a value as fine and the save then rejecting it is the failure mode
+ * this shares a function to avoid.
+ *
+ * Inside the repo is refused rather than merely discouraged: `git worktree add`
+ * accepts a target under the checkout, and the result is a repo that contains
+ * copies of itself, each of which git then reports as an untracked directory.
+ */
+export function worktreeRootProblem(root: string, boxPath: string): string | null {
+  if (!path.isAbsolute(root)) return "must be an absolute path";
+  if (path.dirname(root) === root) return "the filesystem root is not a worktree root";
+  if (root === boxPath) return "cannot be the box's own folder";
+  if (isInside(root, boxPath)) return "cannot sit inside the box's own repo";
+  return null;
+}
+
+/** Is `child` at or below `parent`? Compared as paths, not on disk, so it holds
+ *  for a root that does not exist yet. */
+function isInside(child: string, parent: string): boolean {
+  const rel = path.relative(parent, child);
+  return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+}
+
+/**
+ * What a directory is, as far as creating a worktree root under it goes.
+ *
+ * Three states and not two: "does not exist" has to be told apart from "exists
+ * and refuses writes", or the walk in `worktreeRootWritable` climbs straight
+ * past a read-only directory to a writable grandparent and calls the root fine.
+ */
+export type DirProbe = (dir: string) => "writable" | "blocked" | "missing";
+
+const statProbe: DirProbe = (dir) => {
+  try {
+    if (!fs.statSync(dir).isDirectory()) return "blocked";
+  } catch {
+    return "missing";
+  }
+  try {
+    fs.accessSync(dir, fs.constants.W_OK);
+    return "writable";
+  } catch {
+    return "blocked";
+  }
+};
+
+/**
+ * Could a worktree actually be created under this root, on this machine?
+ *
+ * The root need not exist — `worktreeAddCommand` mkdir -p's it — so what must
+ * accept writes is the nearest ancestor that DOES exist. This is a fact about
+ * the machine right now rather than about the config, which is why it is
+ * separate from `worktreeRootProblem`: it warns, it never rejects a save. A
+ * directory can be created, and permissions change.
+ *
+ * The case that motivates it: a dotfiles repo checked out at `~` has `/Users`
+ * (or `/home`) as its parent, and that is root-owned, so the sibling default is
+ * a path the very first session would fail on.
+ */
+export function worktreeRootWritable(root: string, probe: DirProbe = statProbe): boolean {
+  let dir = root;
+  for (;;) {
+    const state = probe(dir);
+    if (state === "writable") return true;
+    if (state === "blocked") return false;
+    const up = path.dirname(dir);
+    if (up === dir) return false;
+    dir = up;
+  }
+}
+
+/**
+ * The worktree root to offer for a box that has not set one: its folder's own
+ * parent, which is where worktrees already go by default.
+ *
+ * Null when that parent is no use — the filesystem root, the repo itself, or a
+ * directory that refuses writes. The setup panel then offers nothing and says
+ * why, rather than prefilling a path whose first session would fail. Inventing
+ * a convention like `~/worktrees` in its place would be a guess dressed up as a
+ * default, and wrong on any machine that keeps them somewhere else.
+ */
+export function defaultWorktreeRoot(boxPath: string | null, probe: DirProbe = statProbe): string | null {
+  if (!boxPath) return null;
+  const parent = path.dirname(boxPath);
+  if (worktreeRootProblem(parent, boxPath)) return null;
+  return worktreeRootWritable(parent, probe) ? parent : null;
+}
+
 /** Is this folder a git repository at all? The setup panel's live path
  *  validation and the wizard's worktree-step skip both key off this rather
  *  than off any particular box being special. */

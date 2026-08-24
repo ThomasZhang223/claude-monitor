@@ -253,8 +253,10 @@ is gitignored; `config.example.json` documents the shape:
   (`<folder>_<slug>`), which is wrong whenever those siblings must not be
   polluted: an umbrella checkout sits among the repos it coordinates, and a box
   on `~/src` would drop worktrees straight into your home directory. The
-  directory is created on first use. Edit it in `config.json`, not in the setup
-  panel — the panel carries the existing value through rather than dropping it.
+  directory is created on first use. Set it in the setup panel's `wtroot` step
+  or here in `config.json`; both refuse the filesystem root and any directory
+  inside the box's own repo. Leaving it empty in the panel stores `null`, which
+  is the sibling default.
 
 Everything else (whether a box is git-capable, a session's worktree path, its
 branch) is derived at use time from `path`, never stored, so nothing here can
