@@ -404,3 +404,55 @@ test("worktreeAddCommand: the collection folder is created before git needs it",
   const cmd = worktreeAddCommand(DUCK.path!, "cc/plt1836", target);
   assert.match(cmd, /^mkdir -p '\/calder\/duck_worktrees' && /);
 });
+
+// ---------------------------------------------------------------------------
+// Reporting a git failure
+// ---------------------------------------------------------------------------
+
+test("ensureWorktree: reports git's diagnostic, not its progress chatter", async () => {
+  // Verbatim stderr from a real failed run against calder-duck. The first line
+  // is progress, and reporting it told the user "Preparing worktree" as the
+  // reason nothing happened - which read as no error at all.
+  const stderr = "Preparing worktree (new branch 'cc/test')\nfatal: a branch named 'cc/test' already exists\n";
+  const exec = fakeExec([
+    [/fetch origin main/, { ok: true }],
+    [/merge --ff-only/, { ok: true }],
+    [/worktree add/, { ok: false, stderr }],
+  ]);
+  const out = await ensureWorktree(ALPHA, "test", PREFIX, { adopt: false, exists: () => false }, exec);
+  assert.equal(out.kind, "failed");
+  assert.match((out as { reason: string }).reason, /a branch named 'cc\/test' already exists/);
+  assert.doesNotMatch((out as { reason: string }).reason, /Preparing worktree/);
+});
+
+test("ensureWorktree: a fatal outranks an error, being why the command stopped", async () => {
+  const stderr = "error: unable to read ref\nfatal: could not create the worktree\n";
+  const exec = fakeExec([
+    [/fetch origin main/, { ok: true }],
+    [/merge --ff-only/, { ok: true }],
+    [/worktree add/, { ok: false, stderr }],
+  ]);
+  const out = await ensureWorktree(ALPHA, "x", PREFIX, { adopt: false, exists: () => false }, exec);
+  assert.match((out as { reason: string }).reason, /could not create the worktree/);
+});
+
+test("ensureWorktree: stderr following neither convention still reports something", async () => {
+  const exec = fakeExec([
+    [/fetch origin main/, { ok: true }],
+    [/merge --ff-only/, { ok: true }],
+    [/worktree add/, { ok: false, stderr: "something went sideways\n" }],
+  ]);
+  const out = await ensureWorktree(ALPHA, "x", PREFIX, { adopt: false, exists: () => false }, exec);
+  assert.match((out as { reason: string }).reason, /something went sideways/);
+});
+
+test("ensureWorktree: empty stderr falls through to the caller's own default", async () => {
+  // gitError returns "" rather than a placeholder precisely so this `||` works.
+  const exec = fakeExec([
+    [/fetch origin main/, { ok: true }],
+    [/merge --ff-only/, { ok: true }],
+    [/worktree add/, { ok: false, stderr: "" }],
+  ]);
+  const out = await ensureWorktree(ALPHA, "x", PREFIX, { adopt: false, exists: () => false }, exec);
+  assert.equal((out as { reason: string }).reason, "worktree add failed");
+});

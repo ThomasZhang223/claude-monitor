@@ -252,7 +252,7 @@ export async function fastForwardMain(box: BoxDef, exec: Exec = execAsync): Prom
   const { fetch, merge } = ffMainCommands(box.path);
   const fetched = await exec(fetch, 30_000);
   if (!fetched.ok) {
-    return { kind: "failed", reason: firstLine(fetched.stderr) || "fetch failed" };
+    return { kind: "failed", reason: gitError(fetched.stderr) || "fetch failed" };
   }
 
   const branch = await exec(currentBranchCommand(box.path), 5000);
@@ -264,7 +264,7 @@ export async function fastForwardMain(box: BoxDef, exec: Exec = execAsync): Prom
 
   const merged = await exec(merge, 15_000);
   if (!merged.ok) {
-    return { kind: "failed", reason: firstLine(merged.stderr) || "fast-forward refused" };
+    return { kind: "failed", reason: gitError(merged.stderr) || "fast-forward refused" };
   }
   return { kind: "ok" };
 }
@@ -313,7 +313,7 @@ export async function ensureWorktree(
 
   const branch = branchFor(slug, branchPrefix);
   const r = await exec(worktreeAddCommand(box.path, branch, target), 60_000);
-  if (!r.ok) return { kind: "failed", reason: firstLine(r.stderr) || "worktree add failed" };
+  if (!r.ok) return { kind: "failed", reason: gitError(r.stderr) || "worktree add failed" };
   return { kind: "created", path: target, branch };
 }
 
@@ -327,6 +327,27 @@ export async function currentBranch(worktree: string, exec: Exec = execAsync): P
   return r.stdout.trim() || null;
 }
 
-function firstLine(s: string): string {
-  return s.split("\n").map((l) => l.trim()).find((l) => l.length > 0) ?? "";
+/**
+ * The diagnostic line out of a git command's stderr.
+ *
+ * Deliberately not the first line. git writes progress to stderr as well as
+ * errors, so a failed `worktree add` leads with "Preparing worktree (new branch
+ * 'cc/x')" and only then says "fatal: a branch named 'cc/x' already exists".
+ * Reporting the first line put that progress chatter in the footer as the
+ * reason the spawn failed, which read as nothing having gone wrong at all — the
+ * session silently never appeared.
+ *
+ * git prefixes real diagnostics with `fatal:` or `error:`, so that is what is
+ * looked for. A `fatal:` wins over an `error:` because it is the summary of why
+ * the command stopped. Output following neither convention falls back to the
+ * first non-empty line.
+ *
+ * Still returns "" for empty stderr: every caller ors it with a default of its
+ * own, and that is what keeps a silent failure from reporting as a blank.
+ */
+function gitError(s: string): string {
+  const lines = s.split("\n").map((l) => l.trim()).filter((l) => l.length > 0);
+  const fatal = lines.find((l) => l.startsWith("fatal:"));
+  const error = lines.find((l) => l.startsWith("error:"));
+  return fatal ?? error ?? lines[0] ?? "";
 }
