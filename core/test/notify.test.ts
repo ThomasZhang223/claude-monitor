@@ -56,8 +56,10 @@ function pane(
   status: Status,
   hasClaude = true,
   auto: PaneRecord["auto"] = null,
+  windowIndex = 0,
 ): PaneRecord {
   return {
+    windowIndex,
     paneIndex,
     panePid: 100 + paneIndex,
     status,
@@ -74,7 +76,7 @@ test("planNotifications: a fresh transition resets the clock and does not fire",
   const records = [record({ status: "awaiting", panes: [pane(0, "awaiting")] })];
   const { nextState, fire } = planNotifications(new Map(), records, 1_000);
   assert.equal(fire.length, 0);
-  assert.deepEqual(nextState.get(paneNotifyKey(records[0].tmuxName, 0)), {
+  assert.deepEqual(nextState.get(paneNotifyKey(records[0].tmuxName, 0, 0)), {
     status: "awaiting",
     since: 1_000,
     notified: false,
@@ -84,7 +86,7 @@ test("planNotifications: a fresh transition resets the clock and does not fire",
 test("planNotifications: fires once the settle window has passed", () => {
   const records = [record({ status: "awaiting", panes: [pane(0, "awaiting")] })];
   const prev: NotifyStateMap = new Map([
-    [paneNotifyKey(records[0].tmuxName, 0), { status: "awaiting", since: 1_000, notified: false }],
+    [paneNotifyKey(records[0].tmuxName, 0, 0), { status: "awaiting", since: 1_000, notified: false }],
   ]);
   const { fire } = planNotifications(prev, records, 1_000 + NOTIFY_SETTLE_MS);
   assert.equal(fire.length, 1);
@@ -94,7 +96,7 @@ test("planNotifications: fires once the settle window has passed", () => {
 test("planNotifications: does not fire before the settle window has passed", () => {
   const records = [record({ status: "awaiting", panes: [pane(0, "awaiting")] })];
   const prev: NotifyStateMap = new Map([
-    [paneNotifyKey(records[0].tmuxName, 0), { status: "awaiting", since: 1_000, notified: false }],
+    [paneNotifyKey(records[0].tmuxName, 0, 0), { status: "awaiting", since: 1_000, notified: false }],
   ]);
   const { fire } = planNotifications(prev, records, 1_000 + NOTIFY_SETTLE_MS - 1);
   assert.equal(fire.length, 0);
@@ -103,14 +105,14 @@ test("planNotifications: does not fire before the settle window has passed", () 
 test("planNotifications: fires once per streak, not every tick after settling", () => {
   const records = [record({ status: "awaiting", panes: [pane(0, "awaiting")] })];
   const prev: NotifyStateMap = new Map([
-    [paneNotifyKey(records[0].tmuxName, 0), { status: "awaiting", since: 1_000, notified: true }],
+    [paneNotifyKey(records[0].tmuxName, 0, 0), { status: "awaiting", since: 1_000, notified: true }],
   ]);
   const { fire } = planNotifications(prev, records, 1_000 + NOTIFY_SETTLE_MS + 10_000);
   assert.equal(fire.length, 0);
 });
 
 test("planNotifications: re-arms after the status changes away and back", () => {
-  const key = paneNotifyKey(record().tmuxName, 0);
+  const key = paneNotifyKey(record().tmuxName, 0, 0);
   // Was awaiting and already notified; now working again.
   const prev: NotifyStateMap = new Map([
     [key, { status: "awaiting", since: 1_000, notified: true }],
@@ -131,7 +133,7 @@ test("planNotifications: re-arms after the status changes away and back", () => 
 });
 
 test("planNotifications: working and idle never fire, however long they persist", () => {
-  const key = paneNotifyKey(record().tmuxName, 0);
+  const key = paneNotifyKey(record().tmuxName, 0, 0);
   const prev: NotifyStateMap = new Map([
     [key, { status: "working", since: 0, notified: false }],
   ]);
@@ -141,7 +143,7 @@ test("planNotifications: working and idle never fire, however long they persist"
 });
 
 test("planNotifications: a killed session's pane is dropped, not carried forward", () => {
-  const key = paneNotifyKey(record().tmuxName, 0);
+  const key = paneNotifyKey(record().tmuxName, 0, 0);
   const prev: NotifyStateMap = new Map([
     [key, { status: "awaiting", since: 0, notified: false }],
   ]);
@@ -157,8 +159,8 @@ test("planNotifications: a work session's two panes are tracked independently", 
     }),
   ];
   const prev: NotifyStateMap = new Map([
-    [paneNotifyKey(records[0].tmuxName, 0), { status: "idle", since: 0, notified: false }],
-    [paneNotifyKey(records[0].tmuxName, 1), { status: "permission", since: 0, notified: false }],
+    [paneNotifyKey(records[0].tmuxName, 0, 0), { status: "idle", since: 0, notified: false }],
+    [paneNotifyKey(records[0].tmuxName, 0, 1), { status: "permission", since: 0, notified: false }],
   ]);
   const { fire } = planNotifications(prev, records, NOTIFY_SETTLE_MS);
   assert.equal(fire.length, 1, "only the implement pane's permission transition fires");
@@ -174,7 +176,7 @@ test("buildNotificationContent: the pane label goes in the title, not the subtit
   // previously differed only in the smaller subtitle line, so a plan and an
   // implement alert read as the same banner - which is how implement
   // notifications came to look like they were never firing at all.
-  const r = record({ mode: "work" });
+  const r = record({ mode: "work", panes: [pane(0, "idle"), pane(1, "idle")] });
   assert.equal(paneLabelFor(r, 0), "plan");
   assert.equal(paneLabelFor(r, 1), "implement");
   const content = buildNotificationContent(r, pane(1, "permission"));
@@ -194,15 +196,40 @@ test("buildNotificationContent: a q-mode session has no pane label", () => {
   assert.equal(content?.subtitle, `cc-${GENERAL.id}-q-notes`);
 });
 
+test("paneLabelFor: a 4-pane work session gets four distinct labels", () => {
+  // The exact defect notify.ts's own header is written around: three
+  // identically-titled "implement" notifications for a session that grew past
+  // two panes.
+  const r = record({
+    mode: "work",
+    panes: [pane(0, "idle"), pane(1, "idle"), pane(2, "idle"), pane(3, "idle")],
+  });
+  assert.deepEqual(
+    [0, 1, 2, 3].map((i) => paneLabelFor(r, i)),
+    ["plan", "implement", "panel 3", "panel 4"],
+  );
+});
+
+test("paneLabelFor: a grown non-work session labels every pane panel N", () => {
+  const r = record({ mode: "research", panes: [pane(0, "idle"), pane(1, "idle")] });
+  assert.equal(paneLabelFor(r, 0), "panel 1");
+  assert.equal(paneLabelFor(r, 1), "panel 2");
+});
+
+test("paneLabelFor: a single-pane session has nothing to disambiguate", () => {
+  const r = record({ mode: "work", panes: [pane(0, "idle")] });
+  assert.equal(paneLabelFor(r, 0), null);
+});
+
 test("buildNotificationContent: each pane gets its own notification group", () => {
   // Grouping is per pane, never per session. terminal-notifier replaces a
   // notification that shares a group, so a session-level group would make one
   // pane's alert silently overwrite the other's.
-  const r = record({ mode: "work" });
+  const r = record({ mode: "work", panes: [pane(0, "idle"), pane(1, "idle")] });
   const planGroup = buildNotificationContent(r, pane(0, "awaiting"))?.group;
   const implGroup = buildNotificationContent(r, pane(1, "awaiting"))?.group;
-  assert.equal(planGroup, paneNotifyKey(r.tmuxName, 0));
-  assert.equal(implGroup, paneNotifyKey(r.tmuxName, 1));
+  assert.equal(planGroup, paneNotifyKey(r.tmuxName, 0, 0));
+  assert.equal(implGroup, paneNotifyKey(r.tmuxName, 0, 1));
   assert.notEqual(planGroup, implGroup);
 });
 
@@ -262,14 +289,14 @@ function fakeExec(handlers: Array<[RegExp, Partial<ExecResult>]> = []): Exec & {
 
 test("fireNotification: shells out with the expected flags and attach command", async () => {
   const exec = fakeExec([[/command -v terminal-notifier/, { stdout: "/usr/local/bin/terminal-notifier\n" }]]);
-  const r = record();
+  const r = record({ panes: [pane(0, "idle"), pane(1, "idle")] });
   await fireNotification(r, pane(1, "permission"), exec, "darwin");
   const call = exec.calls.find((c) => c.startsWith("terminal-notifier"));
   assert.ok(call, "called terminal-notifier");
   assert.match(call!, /-title 'Needs Permission — implement'/);
   assert.match(call!, new RegExp(`-subtitle '${r.tmuxName}'`));
   assert.match(call!, /-sound 'Ping'/);
-  assert.match(call!, new RegExp(`-group '${r.tmuxName}:1'`));
+  assert.match(call!, new RegExp(`-group '${r.tmuxName}:0\\.1'`));
   assert.match(call!, new RegExp(`-execute '.*bin/monitor-attach ${r.tmuxName}'`));
 });
 
@@ -309,14 +336,14 @@ test("fireNotification: no-ops when terminal-notifier is missing", async () => {
 
 test("fireNotification: Linux fires notify-send, never terminal-notifier", async () => {
   const exec = fakeExec([[/command -v notify-send/, { stdout: "/usr/bin/notify-send\n" }]]);
-  const r = record();
+  const r = record({ panes: [pane(0, "idle"), pane(1, "idle")] });
   await fireNotification(r, pane(1, "permission"), exec, "linux");
   const call = exec.calls.find((c) => c.startsWith("setsid"));
   assert.ok(call, "called notify-send");
   assert.ok(!exec.calls.some((c) => c.includes("terminal-notifier")), "no macOS binary probed");
   assert.match(call!, /-u critical/, "a permission prompt stalls work outright");
   assert.match(call!, /'Needs Permission — implement'/);
-  assert.match(call!, new RegExp(`x-canonical-private-synchronous:${r.tmuxName}:1`));
+  assert.match(call!, new RegExp(`x-canonical-private-synchronous:${r.tmuxName}:0\\.1`));
   assert.match(call!, new RegExp(`bin/monitor-attach ${r.tmuxName}`));
 });
 

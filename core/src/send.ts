@@ -9,8 +9,9 @@
  * policy. The three gap constants below were measured over 19 live trials
  * (see their own comments) and move here unchanged - they are not retuned.
  */
-import { capturePane, clearDraft, composerText, sendEnter, sendText } from "./tmux.ts";
+import { capturePane, clearDraft, composerText, paneTarget, sendEnter, sendText } from "./tmux.ts";
 import { type Exec } from "./exec.ts";
+import { type PanePosition } from "./model.ts";
 
 /**
  * Gap between clearing the composer and typing into it. The whole reason a
@@ -114,11 +115,11 @@ async function stageCommand(
  */
 export async function sendSlashCommand(
   tmuxName: string,
-  pane: number,
+  pane: PanePosition,
   command: string,
   opts: { clear?: boolean; deps?: SendDeps } = {},
 ): Promise<SendFailure | null> {
-  const target = `${tmuxName}.${pane}`;
+  const target = paneTarget(tmuxName, pane.windowIndex, pane.paneIndex);
   const deps = opts.deps ?? {};
   const clear = opts.clear ?? false;
   const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));

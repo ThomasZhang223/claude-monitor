@@ -14,6 +14,7 @@ import {
   FLAG_ON,
   GIT_MS,
   GLYPH_W,
+  GROUP_ORDER,
   MODES,
   MODE_ORDER,
   OPT_FLAG,
@@ -28,9 +29,14 @@ import {
   SPINNER_MS,
   STATUS_STYLES,
   USAGE_MS,
+  comparePanePosition,
+  groupLabel,
+  groupOf,
   type BoxDef,
   type BoxId,
+  type DisplayGroup,
   type Mode,
+  type PanePosition,
   type SessionRecord,
   type Status,
 } from "../core/src/model.ts";
@@ -45,10 +51,11 @@ import {
   type Config,
 } from "../core/src/config.ts";
 import { PALETTE, PALETTE_COLS, PALETTE_ROWS, firstUnusedColor } from "../core/src/palette.ts";
-import { layoutRow, rowBackground } from "../core/src/row.ts";
+import { layoutDeepRow, layoutRow, rowBackground, type PaneCell } from "../core/src/row.ts";
 import { collectSessions } from "../core/src/collect.ts";
 import { arrange, boxHeights, panelSplit, previewRows } from "../core/src/layout.ts";
 import {
+  boxGroups,
   boxRows,
   clampFocus,
   focusFor,
@@ -59,7 +66,14 @@ import {
   type Focus,
 } from "../core/src/focus.ts";
 import { autoRecap, readRecap, type AutoRecap, type Recap } from "../core/src/recap.ts";
-import { buildMultiPreview, pickRecap, type PreviewLine, type Tone } from "../core/src/preview.ts";
+import {
+  buildMultiPreview,
+  buildPreview,
+  pickRecap,
+  type PreviewContent,
+  type PreviewLine,
+  type Tone,
+} from "../core/src/preview.ts";
 import { classifyName, sanitizeLabel, suggestLabel, validateLabel } from "../core/src/naming.ts";
 import { promptTailLines } from "../core/src/prompt.ts";
 import { spawnSession } from "../core/src/spawn.ts";
@@ -69,6 +83,7 @@ import {
   WRAP_TIMEOUT_MS,
   decideWrap,
   encodeWrap,
+  nextWrapPosition,
   wrapOrder,
   sendWrap,
   type WrapJob,
@@ -296,6 +311,91 @@ function SessionRow({
   );
 }
 
+/**
+ * A DEEP WORK row: one cell per pane, glyph plus PID where there is room.
+ *
+ * Markup only over `layoutDeepRow` - see row.ts for the arithmetic. This has
+ * no glyph band in front of the name (see layoutDeepRow's own ceiling note),
+ * so the cell region is padded out to the same "available" budget
+ * layoutDeepRow computed, keeping ctx flush against the row's right edge
+ * whichever tier ends up drawn.
+ */
+function DeepWorkRow({
+  record,
+  width,
+  boxColor,
+  focused,
+  frame,
+  blinkOn,
+}: {
+  record: SessionRecord;
+  width: number;
+  boxColor: string;
+  focused: boolean;
+  frame: number;
+  blinkOn: boolean;
+}) {
+  const layout = layoutDeepRow(record, width);
+  const bg = rowBackground(boxColor, focused, record.flagged) ?? undefined;
+
+  // Duplicated from layoutDeepRow's own local constants on purpose - the same
+  // convention SessionRow already uses for layoutRow's NAME_PID_GAP/PID_DETAIL_GAP.
+  const NAME_CELLS_GAP = 3;
+  const CELLS_CTX_GAP = 3;
+  const available = Math.max(
+    0,
+    width - 1 - layout.nameW - NAME_CELLS_GAP - CELLS_CTX_GAP - layout.ctxW,
+  );
+  const usedWidth = layout.badge
+    ? GLYPH_W + 3
+    : layout.tier === "pid"
+      ? layout.cells.length * (GLYPH_W + layout.pidW)
+      : layout.cells.length * GLYPH_W;
+  const fillerWidth = Math.max(0, available - usedWidth);
+
+  const ctx = record.contextPct === null ? "" : `${record.contextPct}%`;
+
+  return (
+    <Box>
+      <Text backgroundColor={bg}>{focused ? "▸" : " "}</Text>
+      <Text bold={focused} backgroundColor={bg}>{pad(record.label, layout.nameW)}</Text>
+      <Text backgroundColor={bg}>{" ".repeat(NAME_CELLS_GAP)}</Text>
+      {layout.badge ? (
+        <>
+          <StatusGlyph
+            status={layout.badge.status}
+            boxColor={boxColor}
+            frame={frame}
+            blinkOn={blinkOn}
+            backgroundColor={bg}
+          />
+          <Text backgroundColor={bg}>{` ×${layout.badge.total}`}</Text>
+        </>
+      ) : (
+        layout.cells.map((cell: PaneCell) => (
+          <React.Fragment key={`${cell.windowIndex}.${cell.paneIndex}`}>
+            <StatusGlyph
+              status={cell.status}
+              boxColor={boxColor}
+              frame={frame}
+              blinkOn={blinkOn}
+              backgroundColor={bg}
+            />
+            {layout.tier === "pid" ? (
+              <Text dimColor backgroundColor={bg}>
+                {pad(cell.pid === null ? "—" : String(cell.pid), layout.pidW)}
+              </Text>
+            ) : null}
+          </React.Fragment>
+        ))
+      )}
+      <Text backgroundColor={bg}>{" ".repeat(fillerWidth)}</Text>
+      <Text backgroundColor={bg}>{" ".repeat(CELLS_CTX_GAP)}</Text>
+      <Text dimColor backgroundColor={bg}>{ctx.padStart(layout.ctxW)}</Text>
+    </Box>
+  );
+}
+
 function SessionBox({
   def,
   width,
@@ -319,19 +419,20 @@ function SessionBox({
   const inner = width - 4;
   const anySessions = records.length > 0;
 
-  // A heading (and its rows) only renders for a class that actually has
-  // sessions here - a box using one or two classes is tighter than one that
-  // pays a header's worth of rows for every class it isn't using.
-  const group = (mode: Mode) => {
-    const rows = records.filter((r) => r.mode === mode);
+  // A heading (and its rows) only renders for a group that actually has
+  // sessions here - a box using one or two groups is tighter than one that
+  // pays a header's worth of rows for every group it isn't using.
+  const group = (g: DisplayGroup) => {
+    const rows = records.filter((r) => groupOf(r.mode, r.panes.length) === g);
     if (rows.length === 0) return null;
+    const Row = g === "deep" ? DeepWorkRow : SessionRow;
     return (
-      <React.Fragment key={mode}>
+      <React.Fragment key={g}>
         <Box>
-          <Text color={def.color}>{MODES[mode].label}</Text>
+          <Text color={def.color}>{groupLabel(g)}</Text>
         </Box>
         {rows.map((r) => (
-          <SessionRow
+          <Row
             key={r.tmuxName}
             record={r}
             width={inner}
@@ -353,7 +454,7 @@ function SessionBox({
       color={def.color}
       selected={selected}
     >
-      {MODE_ORDER.map((mode) => group(mode))}
+      {GROUP_ORDER.map((g) => group(g))}
       {/* An empty box says so, and that is all. No per-box create hint: the
           footer already names the keys and colours them for the selected box,
           so repeating them inside every box you moved the cursor onto was
@@ -491,6 +592,7 @@ function PreviewBox({
   record,
   boxColor,
   panePreviews,
+  previewPane,
   now,
   hidden,
 }: {
@@ -500,12 +602,15 @@ function PreviewBox({
   /** The focused session's box colour, resolved by the caller (config lives
    *  in Dashboard's state, not in a static lookup table any more). */
   boxColor: string;
-  /** Up to two blocks — one per pane with a resolved Claude process, so a
-   *  work session's plan and implement panes both show instead of whichever
-   *  one a first-pane lookup happened to land on. `label` is null for a
+  /** One entry per pane with a resolved Claude process, so a work session's
+   *  plan and implement panes both show instead of whichever one a
+   *  first-pane lookup happened to land on. `label` is null for a
    *  single-pane session (nothing to disambiguate) or the rare case where no
-   *  pane resolved a Claude process at all. */
-  panePreviews: Array<{ label: string | null; recap: Recap | null; auto: AutoRecap | null }>;
+   *  pane resolved a Claude process at all. Two or fewer render stacked; more
+   *  than two step through one at a time via `previewPane`. */
+  panePreviews: Array<{ label: string | null; recap: Recap | null; auto: AutoRecap | null; pid: number | null }>;
+  /** Which entry the stepped (>2 panes) view is showing. Ignored otherwise. */
+  previewPane: number;
   now: number;
   hidden: boolean;
 }) {
@@ -559,16 +664,27 @@ function PreviewBox({
   const factRows = facts.length > 0 ? 1 : 0;
   const worktreeRows = record.worktree ? 1 : 0;
   const interior = Math.max(0, height - 2);
-  // One subtitle row per labeled block (a work session's panes); a single
-  // unlabeled block reserves nothing here and carves its caveat line out
-  // afterward instead, same as before this was ever more than one block.
+  // More than two panes steps through one at a time instead of stacking every
+  // block - buildMultiPreview stays a two-block builder (see preview.ts's own
+  // "Known, not fixed" note), so the TUI never hands it more than two inputs.
+  const stepped = panePreviews.length > 2;
+  // One subtitle row per labeled block (a work session's panes), or one
+  // heading row for the stepped view; a single unlabeled block reserves
+  // nothing here and carves its caveat line out afterward instead, same as
+  // before this was ever more than one block.
   const hasLabels = panePreviews.some((p) => p.label !== null);
-  const subtitleRows = hasLabels ? panePreviews.length : 0;
+  const subtitleRows = stepped ? 1 : hasLabels ? panePreviews.length : 0;
   // Everything left over goes to the summary bodies, so a taller window shows
   // more of them rather than the same truncated lines.
   const bodyRows = Math.max(0, interior - factRows - worktreeRows - 1 - subtitleRows);
 
-  const blocks = buildMultiPreview(panePreviews, textW, bodyRows);
+  const steppedIdx = Math.min(Math.max(0, previewPane), panePreviews.length - 1);
+  const steppedInput = stepped ? panePreviews[steppedIdx] : null;
+  const steppedContent: PreviewContent | null = steppedInput
+    ? buildPreview({ recap: steppedInput.recap, auto: steppedInput.auto, width: textW, rows: bodyRows })
+    : null;
+
+  const blocks = stepped ? [] : buildMultiPreview(panePreviews, textW, bodyRows);
   // The single-unlabeled-block case's caveat sentence isn't accounted for
   // inside buildMultiPreview (only the labeled path renders a subtitle line),
   // so it comes out of that block's own already-fit lines instead.
@@ -607,20 +723,36 @@ function PreviewBox({
       ) : null}
       {record.worktree ? <Text dimColor>{record.worktree.slice(0, textW)}</Text> : null}
       <Text> </Text>
-      {displayBlocks.map((block, i) => (
-        <React.Fragment key={block.label ?? i}>
-          {block.label ? (
+      {steppedContent ? (
+        <>
+          <Box justifyContent="space-between">
             <Text dimColor>
-              {`▸ ${capitalize(block.label)}${
-                block.recapAt !== null ? ` · ${formatAge(now - block.recapAt)} ago` : ""
-              }`}
+              {`▸ Panel ${steppedIdx + 1} of ${panePreviews.length}` +
+                (steppedInput?.pid !== null ? ` · ${steppedInput?.pid}` : "") +
+                (steppedContent.recapAt !== null
+                  ? ` · ${formatAge(now - steppedContent.recapAt)} ago`
+                  : "")}
             </Text>
-          ) : block.standIn ? (
-            <Text dimColor>{"no recap yet - showing the last thing it said"}</Text>
-          ) : null}
-          <PreviewBody lines={block.lines} width={textW} />
-        </React.Fragment>
-      ))}
+            <Text dimColor>{"‹ ›"}</Text>
+          </Box>
+          <PreviewBody lines={steppedContent.lines} width={textW} />
+        </>
+      ) : (
+        displayBlocks.map((block, i) => (
+          <React.Fragment key={block.label ?? i}>
+            {block.label ? (
+              <Text dimColor>
+                {`▸ ${capitalize(block.label)}${
+                  block.recapAt !== null ? ` · ${formatAge(now - block.recapAt)} ago` : ""
+                }`}
+              </Text>
+            ) : block.standIn ? (
+              <Text dimColor>{"no recap yet - showing the last thing it said"}</Text>
+            ) : null}
+            <PreviewBody lines={block.lines} width={textW} />
+          </React.Fragment>
+        ))
+      )}
     </Panel>
   );
 }
@@ -1568,14 +1700,18 @@ function Dashboard() {
   // keeps its fast path (and smoke/keys.sh's assertions against it) untouched.
   const [wizardStep, setWizardStep] = useState<WizardStep>("class");
   const [busy, setBusy] = useState<string | null>(null);
-  /** Up to two blocks for the preview panel — one per pane with a resolved
-   *  Claude process, so a work session shows both plan and implement instead
-   *  of whichever `panes.find()` happened to land on first. `label` is
-   *  "plan"/"implement" for a work session, null for a single-pane session or
-   *  the rare case where no pane has resolved a Claude process at all. */
+  /** One entry per pane with a resolved Claude process, so a work session
+   *  shows both plan and implement instead of whichever `panes.find()`
+   *  happened to land on first. `label` is "plan"/"implement"/"panel N" for a
+   *  multi-pane session, null for a single-pane one or the rare case where no
+   *  pane has resolved a Claude process at all. Two or fewer render stacked in
+   *  the preview; more than two step through one at a time. */
   const [panePreviews, setPanePreviews] = useState<
-    Array<{ label: string | null; recap: Recap | null; auto: AutoRecap | null }>
+    Array<{ label: string | null; recap: Recap | null; auto: AutoRecap | null; pid: number | null }>
   >([]);
+  /** Which panePreviews entry the stepped (>2 panes) view is showing. Reset to
+   *  0 whenever the focused session or its resolved panes change. */
+  const [previewPane, setPreviewPane] = useState(0);
   const [showPreview, setShowPreview] = useState(true);
   const [branches, setBranches] = useState<Record<string, string>>({});
   /** Claude's own recap per session, for the rows. Keyed by tmux name. */
@@ -1861,6 +1997,10 @@ function Dashboard() {
     .join("|");
 
   useEffect(() => {
+    // A newly focused session (or one whose resolved panes just changed)
+    // starts back at its first panel, rather than keeping whatever step
+    // another session happened to be left on.
+    setPreviewPane(0);
     if (!focusedName || !showPreview) {
       setPanePreviews([]);
       return;
@@ -1875,7 +2015,7 @@ function Dashboard() {
       if (panesWithClaude.length === 0) {
         // No pane has a resolved Claude process at all (e.g. a dead session) -
         // still worth showing whatever was published before it died.
-        setPanePreviews([{ label: null, recap: published, auto: null }]);
+        setPanePreviews([{ label: null, recap: published, auto: null, pid: null }]);
         return;
       }
       setPanePreviews(
@@ -1883,6 +2023,7 @@ function Dashboard() {
           label: focused ? paneLabelFor(focused, p.paneIndex) : null,
           recap: published,
           auto: autoRecap(p.claude!.cwd, p.claude!.sessionId),
+          pid: p.claude!.pid,
         })),
       );
     };
@@ -1976,7 +2117,7 @@ function Dashboard() {
    * simply relaunching to pick up an edit - used to drop the pending kill on the
    * floor with no notice. On the session it survives us.
    */
-  const runWrapStep = (target: SessionRecord, pane: number, next: number | null) => {
+  const runWrapStep = (target: SessionRecord, pane: PanePosition, next: PanePosition | null) => {
     void sendWrap(target.tmuxName, pane).then((err) => {
       if (err) {
         say(err);
@@ -1992,13 +2133,14 @@ function Dashboard() {
   };
 
   /**
-   * Start the wrap sequence: plan pane first, then implement.
+   * Start the wrap sequence: every pane of every window, in window-then-pane
+   * order (plan before implement is the two-pane instance of that order).
    *
-   * One pane at a time. Both panes of a work session wrapping at once would be
-   * two Claudes writing into the same inbox simultaneously, which is a known
-   * way to lose one of the two notes - and wrapping plan first means its note
-   * exists before implement's wrap folds in whatever fixes and review rounds
-   * happened after planning.
+   * One pane at a time. Two Claudes wrapping at once would be two of them
+   * writing into the same inbox simultaneously, which is a known way to lose
+   * one of the two notes - and wrapping in order means an earlier pane's note
+   * exists before a later pane's wrap folds in whatever fixes and review
+   * rounds happened after it.
    */
   const startWrap = (target: SessionRecord) => {
     const order = wrapOrder(target.panes);
@@ -2058,13 +2200,20 @@ function Dashboard() {
         dropWrap(job.tmuxName);
         continue;
       }
-      // The pane THIS job is waiting on, not the session's worst-of-both-panes
-      // status - the other pane sitting on a stale "awaiting" or "permission"
+      // The pane THIS job is waiting on, not the session's worst-of-all-panes
+      // status - another pane sitting on a stale "awaiting" or "permission"
       // must not read as the wrap itself being stuck or errored.
-      const paneStatus = record.panes.find((p) => p.paneIndex === job.pane)?.status ?? "dead";
+      const paneStatus =
+        record.panes.find((p) => comparePanePosition(p, job.pane) === 0)?.status ?? "dead";
       const step = decideWrap(job, paneStatus, now);
       if (step.kind === "kill") {
-        if (job.next !== null) runWrapStep(record, job.next, null);
+        // Recomputed from the LIVE pane list, not carried from when the chain
+        // started: a wrap can run for minutes, long enough for a later pane to
+        // have closed, and job.next frozen at send time would then address a
+        // pane that no longer exists. This is also the fix for the chain that
+        // used to stop after exactly two panes and kill regardless of how many
+        // more were still queued.
+        if (job.next !== null) runWrapStep(record, job.next, nextWrapPosition(record.panes, job.next));
         else kill(record);
       } else if (step.kind === "giveup") {
         say(step.reason);
@@ -2111,6 +2260,13 @@ function Dashboard() {
       if (key.rightArrow || input === "l") setFocus((f) => moveBox(f, 1, boxIds));
       if (key.leftArrow || input === "h") setFocus((f) => moveBox(f, -1, boxIds));
       if (input === "p") setShowPreview((v) => !v);
+      // Step the preview through a session with more than two panes. Clamped,
+      // not wrapped, matching moveRow's own choice for the same reason: a
+      // wrap from the last panel to the first reads as a jump.
+      if (input === "[") setPreviewPane((i) => Math.max(0, i - 1));
+      if (input === "]") {
+        setPreviewPane((i) => Math.max(0, Math.min(panePreviews.length - 1, i + 1)));
+      }
 
       if (input === "n" || input === "N") {
         // N keeps its original meaning - preset to QUESTIONS and skip the
@@ -2215,7 +2371,13 @@ function Dashboard() {
 
   const layout = arrange(cols, rows, boxIds);
   const counts = Object.fromEntries(
-    boxIds.map((id) => [id, (byBox.get(id) ?? []).length]),
+    boxIds.map((id) => {
+      const rowsInBox = byBox.get(id) ?? [];
+      // ceiling: a weight, not a guarantee - `allocate` distributes
+      // proportionally, so this makes the box's ask honest rather than making
+      // the extra row certain.
+      return [id, rowsInBox.length + boxGroups(records, id).length];
+    }),
   ) as Record<BoxId, number>;
 
   // A prompt gets its rows reserved before anything else is laid out, and only as
@@ -2280,6 +2442,7 @@ function Dashboard() {
               record={focused}
               boxColor={focused ? boxById.get(focused.box)?.color ?? "white" : "white"}
               panePreviews={panePreviews}
+              previewPane={previewPane}
               now={now}
               hidden={!showPreview}
             />
@@ -2383,6 +2546,11 @@ function Dashboard() {
             session, and that is only obvious if it says so. */}
         <Text color={focusedBox.color}>{`n new in ${focusedBox.label}`}</Text>
         <Text dimColor>{"  S setup  x kill  p preview  q quit"}</Text>
+        {/* Only shown when it means something, so the footer's width is
+            unchanged for every other session - overflow="hidden" silently
+            clips hints off the bottom at narrow widths (see the wizard's own
+            header note), so an unconditional addition is a real risk. */}
+        {focused && focused.panes.length > 2 ? <Text dimColor>{"  [ ] panel"}</Text> : null}
         {busy ? <Text color="yellow">{`  ${busy}...`}</Text> : null}
         {/* A wrap can run for minutes, so say what is being waited on rather than
             leaving a session that looks alive but is about to be killed. */}

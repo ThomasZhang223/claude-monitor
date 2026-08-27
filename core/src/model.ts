@@ -148,6 +148,45 @@ export function isMode(v: string): v is Mode {
   return (MODE_ORDER as readonly string[]).includes(v);
 }
 
+/** More than two panels means the session outgrew the shape it was spawned in.
+ *  A `work` session gets two panes and every other class gets one, so three is
+ *  the first count that no class produces on its own. */
+export const DEEP_WORK_MIN_PANES = 3;
+
+export type DisplayGroup = Mode | "deep";
+
+/** Second, after WORK: a deep-work session is almost always a grown WORK
+ *  session, and it reads next to the group it came from. */
+export const GROUP_ORDER: readonly DisplayGroup[] = [
+  "work", "deep", "quick", "q", "research",
+] as const;
+
+export function groupOf(mode: Mode, paneCount: number): DisplayGroup {
+  return paneCount >= DEEP_WORK_MIN_PANES ? "deep" : mode;
+}
+
+export function groupLabel(group: DisplayGroup): string {
+  return group === "deep" ? "DEEP WORK" : MODES[group].label;
+}
+
+/** Panes sort by window first, then by pane. Pane indexes restart in every
+ *  window, so `paneIndex` alone puts two different panes in the same place. */
+export function comparePanePosition(
+  a: { windowIndex: number; paneIndex: number },
+  b: { windowIndex: number; paneIndex: number },
+): number {
+  return a.windowIndex - b.windowIndex || a.paneIndex - b.paneIndex;
+}
+
+/** A pane's address within its session: which window, and which pane inside
+ *  that window. Shared because send.ts, wrap.ts, tmux.ts, model.ts and the TUI
+ *  all pass this pair around together once a session can have more than one
+ *  window. */
+export interface PanePosition {
+  windowIndex: number;
+  paneIndex: number;
+}
+
 /** Only sessions whose names start with this prefix are ours. It is what keeps
  *  unrelated local tmux sessions out of the dashboard entirely. */
 export const SESSION_PREFIX = "cc";
@@ -312,14 +351,15 @@ export interface SessionRecord {
  */
 export interface PendingWrap {
   /** Pane the command was sent to. */
-  pane: number;
+  pane: PanePosition;
   /** The pane still queued after this one goes quiet, or null if this is the
    *  last (or only) pane. */
-  next: number | null;
+  next: PanePosition | null;
   sentAt: number;
 }
 
 export interface PaneRecord {
+  windowIndex: number;
   paneIndex: number;
   panePid: number;
   status: Status;

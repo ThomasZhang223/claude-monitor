@@ -409,6 +409,13 @@ export async function killSession(name: string, execFn: Exec = execAsync): Promi
   return res.ok;
 }
 
+/** tmux resolves `session.pane` against the session's ACTIVE window, not
+ *  window 0, so a bare pane index sends to the wrong pane the moment a
+ *  session has two windows. Always qualify with the window. */
+export function paneTarget(tmuxName: string, windowIndex: number, paneIndex: number): string {
+  return `${tmuxName}:${windowIndex}.${paneIndex}`;
+}
+
 export interface CreateSessionSpec {
   /** tmux session name — already formatted by formatSessionName. */
   name: string;

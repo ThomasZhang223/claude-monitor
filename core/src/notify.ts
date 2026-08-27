@@ -12,6 +12,7 @@ import { fileURLToPath } from "url";
 import * as path from "path";
 import { execAsync, shellQuote, type Exec } from "./exec.ts";
 import {
+  IMPL_PANE,
   PLAN_PANE,
   STATUS_STYLES,
   type PaneRecord,
@@ -85,8 +86,8 @@ export interface PlanNotificationsResult {
   fire: NotifyDecision[];
 }
 
-export function paneNotifyKey(tmuxName: string, paneIndex: number): string {
-  return `${tmuxName}:${paneIndex}`;
+export function paneNotifyKey(tmuxName: string, windowIndex: number, paneIndex: number): string {
+  return `${tmuxName}:${windowIndex}.${paneIndex}`;
 }
 
 /**
@@ -108,7 +109,7 @@ export function planNotifications(
 
   for (const record of records) {
     for (const pane of record.panes) {
-      const key = paneNotifyKey(record.tmuxName, pane.paneIndex);
+      const key = paneNotifyKey(record.tmuxName, pane.windowIndex, pane.paneIndex);
       const prior = prev.get(key);
       const status = pane.status;
 
@@ -148,12 +149,16 @@ export interface NotificationContent {
   group: string;
 }
 
-/** `plan`/`implement` for a work session's two panes, disambiguating them in
- *  the subtitle since they notify independently; null for a single-pane `q`
- *  session, where there is nothing to disambiguate. */
+/** `plan`/`implement` for a work session's first two panes, `panel N` for
+ *  every pane past that (a work session that outgrew two panes, or any other
+ *  class that has grown more than one) — disambiguating them in the subtitle
+ *  since they notify independently. Null for a single-pane session, where
+ *  there is nothing to disambiguate. */
 export function paneLabelFor(record: SessionRecord, paneIndex: number): string | null {
-  if (record.mode !== "work") return null;
-  return paneIndex === PLAN_PANE ? "plan" : "implement";
+  if (record.panes.length <= 1) return null;
+  if (record.mode === "work" && paneIndex === PLAN_PANE) return "plan";
+  if (record.mode === "work" && paneIndex === IMPL_PANE) return "implement";
+  return `panel ${paneIndex + 1}`;
 }
 
 /** A pane's own one-line account of itself: its auto-recap if it has one,
@@ -191,7 +196,7 @@ export function buildNotificationContent(
     message: `${worktreeLine}\n${paneSummary(pane)}`,
     sound: SOUNDS[pane.status],
     urgency: URGENCIES[pane.status],
-    group: paneNotifyKey(record.tmuxName, pane.paneIndex),
+    group: paneNotifyKey(record.tmuxName, pane.windowIndex, pane.paneIndex),
   };
 }
 

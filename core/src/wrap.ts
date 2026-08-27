@@ -12,7 +12,8 @@
  * stalls leaves the session alive and says so. The session is still there to
  * attach to; nothing is lost but the automation.
  */
-import type { PaneRecord, PendingWrap, Status } from "./model.ts";
+import { comparePanePosition, type PaneRecord, type PanePosition, type PendingWrap, type Status } from "./model.ts";
+import { paneTarget } from "./tmux.ts";
 import { sendSlashCommand, type SendDeps } from "./send.ts";
 
 export { CLEAR_GAP_MS, SUBMIT_GAP_MS, RESEND_GAP_MS } from "./send.ts";
@@ -55,15 +56,44 @@ const FIELD_SEP = ":";
  *  produce by accident and hard to see. */
 const NO_NEXT = "-";
 
+/** `<window>.<pane>`, the position half of an encoded wrap field. */
+function encodePosition(p: PanePosition): string {
+  return `${p.windowIndex}.${p.paneIndex}`;
+}
+
+/**
+ * Parse one position field, or null if it is not one.
+ *
+ * A field with no `.` is the pre-window-aware format: a bare pane index,
+ * always window 0. That is what lets a wrap already in flight when the
+ * dashboard restarts onto this change still decode correctly.
+ */
+function decodePosition(s: string): PanePosition | null {
+  const dot = s.indexOf(".");
+  if (dot === -1) {
+    const paneIndex = Number(s);
+    if (!Number.isInteger(paneIndex) || paneIndex < 0) return null;
+    return { windowIndex: 0, paneIndex };
+  }
+  const windowIndex = Number(s.slice(0, dot));
+  const paneIndex = Number(s.slice(dot + 1));
+  if (!Number.isInteger(windowIndex) || windowIndex < 0) return null;
+  if (!Number.isInteger(paneIndex) || paneIndex < 0) return null;
+  return { windowIndex, paneIndex };
+}
+
 /**
  * The `@cc_wrap` value for a job: `pane:next:sentAt`.
  *
  * Not JSON. The value is interpolated through a tmux `-F` format string on
  * every poll, so a shape with no braces, quotes or `#` in it is one less thing
- * that can be eaten in transit.
+ * that can be eaten in transit. `.` inside a `pane`/`next` field never
+ * collides with the `:` separating the three top-level fields.
  */
 export function encodeWrap(wrap: PendingWrap): string {
-  return [wrap.pane, wrap.next ?? NO_NEXT, wrap.sentAt].join(FIELD_SEP);
+  return [encodePosition(wrap.pane), wrap.next ? encodePosition(wrap.next) : NO_NEXT, wrap.sentAt].join(
+    FIELD_SEP,
+  );
 }
 
 /**
@@ -78,15 +108,15 @@ export function decodeWrap(value: string | null | undefined): PendingWrap | null
   const fields = value.split(FIELD_SEP);
   if (fields.length !== 3) return null;
 
-  const pane = Number(fields[0]);
+  const pane = decodePosition(fields[0]);
   const sentAt = Number(fields[2]);
-  if (!Number.isInteger(pane) || pane < 0) return null;
+  if (!pane) return null;
   if (!Number.isFinite(sentAt) || sentAt <= 0) return null;
 
-  let next: number | null = null;
+  let next: PanePosition | null = null;
   if (fields[1] !== NO_NEXT) {
-    next = Number(fields[1]);
-    if (!Number.isInteger(next) || next < 0) return null;
+    next = decodePosition(fields[1]);
+    if (!next) return null;
   }
 
   return { pane, next, sentAt };
@@ -130,20 +160,40 @@ export function decideWrap(job: WrapJob, status: Status, now: number): WrapStep 
 }
 
 /**
- * The order panes wrap in: plan before implement.
+ * The order panes wrap in: window by window, and plan before implement within
+ * a window.
  *
  * A work session has two, and wrapping both at once would have two Claudes
  * writing into the same wiki inbox simultaneously — a known way to lose one of
- * the two notes. So they wrap one at a time, plan first, so its note exists
+ * the two notes. So they wrap one at a time — plan first, so its note exists
  * before the implement pane's wrap folds in whatever fixes and review rounds
- * came after planning. A pane with no Claude in it is skipped — there is
- * nothing there to wrap.
+ * came after planning — and that rule generalizes to every pane of every
+ * window a session has grown, not just a work session's original two. A pane
+ * with no Claude in it is skipped — there is nothing there to wrap.
  */
-export function wrapOrder(panes: readonly PaneRecord[]): number[] {
+export function wrapOrder(panes: readonly PaneRecord[]): PanePosition[] {
   return panes
     .filter((p) => p.claude !== null)
-    .map((p) => p.paneIndex)
-    .sort((a, b) => a - b);
+    .map((p) => ({ windowIndex: p.windowIndex, paneIndex: p.paneIndex }))
+    .sort(comparePanePosition);
+}
+
+/**
+ * The position after `current` in this session's wrap order, or null when
+ * `current` is the last one.
+ *
+ * Recomputed from the live record each step rather than carried in @cc_wrap: a
+ * 15-minute wrap outlives the pane list it started with, and a frozen queue
+ * would address a pane that has since been closed. Strictly-greater, so the
+ * chain only ever moves forward, and a pane closed mid-chain is simply skipped
+ * rather than addressed.
+ */
+export function nextWrapPosition(
+  panes: readonly PaneRecord[],
+  current: PanePosition,
+): PanePosition | null {
+  const order = wrapOrder(panes);
+  return order.find((p) => comparePanePosition(p, current) > 0) ?? null;
 }
 
 /** Structurally identical to `SendDeps` - kept as its own name because it is
@@ -162,10 +212,10 @@ export type SendWrapDeps = SendDeps;
  */
 export async function sendWrap(
   tmuxName: string,
-  pane: number,
+  pane: PanePosition,
   deps: SendWrapDeps = {},
 ): Promise<string | null> {
-  const target = `${tmuxName}.${pane}`;
+  const target = paneTarget(tmuxName, pane.windowIndex, pane.paneIndex);
   const fail = await sendSlashCommand(tmuxName, pane, WRAP_COMMAND, { clear: true, deps });
   if (!fail) return null;
 

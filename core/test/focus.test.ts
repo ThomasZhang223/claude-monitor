@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  boxGroups,
   boxRows,
   clampFocus,
   focusFor,
@@ -9,10 +10,18 @@ import {
   moveBox,
   moveRow,
 } from "../src/focus.ts";
-import type { BoxId, Mode, SessionRecord } from "../src/model.ts";
+import type { BoxId, Mode, PaneRecord, SessionRecord } from "../src/model.ts";
 import { ALPHA, BOX_IDS, BRAVO, GENERAL } from "./fixtures/boxes.ts";
 
-function record(box: BoxId, mode: Mode, slug: string): SessionRecord {
+function record(box: BoxId, mode: Mode, slug: string, paneCount = 0): SessionRecord {
+  const panes: PaneRecord[] = Array.from({ length: paneCount }, (_, i) => ({
+    windowIndex: 0,
+    paneIndex: i,
+    panePid: 0,
+    status: "idle",
+    claude: null,
+    auto: null,
+  }));
   return {
     tmuxName: `cc-${box}-${mode}-${slug}`,
     box,
@@ -25,7 +34,7 @@ function record(box: BoxId, mode: Mode, slug: string): SessionRecord {
     createdAt: null,
     branch: null,
     status: "idle",
-    panes: [],
+    panes,
     contextPct: null,
     model: null,
     effort: null,
@@ -67,6 +76,34 @@ test("boxRows: a box using only the two newer classes still orders them correctl
     boxRows(records, ALPHA.id).map((r) => r.slug),
     ["b", "r"],
   );
+});
+
+test("boxRows: a 3-pane work session moves to DEEP WORK, right after WORK", () => {
+  // "small" is only 2 panes and stays WORK; "big" outgrew its shape and moves
+  // to DEEP WORK - which sorts right after WORK regardless of array order.
+  const records = [record(ALPHA.id, "work", "big", 3), record(ALPHA.id, "work", "small", 2)];
+  assert.deepEqual(boxRows(records, ALPHA.id).map((r) => r.slug), ["small", "big"]);
+});
+
+test("boxRows: a 2-pane quick session stays in QUICK, not DEEP WORK", () => {
+  // Pins the threshold decision: it is panes.length > 2, not "more panes than
+  // this mode's own default" - a 2-pane quick session has grown one pane past
+  // its own default of one, but that alone does not cross into DEEP WORK.
+  const withoutDeep = [record(ALPHA.id, "quick", "q", 2)];
+  assert.deepEqual(boxRows(withoutDeep, ALPHA.id).map((r) => r.slug), ["q"]);
+  // Prove it via ordering too: a genuine DEEP WORK session in the same box
+  // sorts before it, since DEEP WORK precedes QUICK in GROUP_ORDER.
+  const withDeep = [record(ALPHA.id, "quick", "q", 2), record(ALPHA.id, "work", "big", 3)];
+  assert.deepEqual(boxRows(withDeep, ALPHA.id).map((r) => r.slug), ["big", "q"]);
+});
+
+test("boxGroups: only non-empty groups, in GROUP_ORDER", () => {
+  const records = [record(ALPHA.id, "research", "r"), record(ALPHA.id, "work", "big", 3)];
+  assert.deepEqual(boxGroups(records, ALPHA.id), ["deep", "research"]);
+});
+
+test("boxGroups: an empty box has no groups at all", () => {
+  assert.deepEqual(boxGroups([], ALPHA.id), []);
 });
 
 test("moveBox: steps through every box including empty ones", () => {

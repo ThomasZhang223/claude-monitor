@@ -35,6 +35,7 @@ import {
   OPT_WORKTREE,
   OPT_WRAP,
   STATE_DIR,
+  comparePanePosition,
   type PaneRecord,
   type SessionRecord,
   type Status,
@@ -135,9 +136,7 @@ export async function collectSessions(
   const records: SessionRecord[] = [];
 
   for (const row of rows) {
-    const sessionPanes = (panesBySession.get(row.name) ?? []).sort(
-      (a, b) => a.paneIndex - b.paneIndex,
-    );
+    const sessionPanes = (panesBySession.get(row.name) ?? []).sort(comparePanePosition);
 
     const createdAt = parseEpoch(row.options[OPT_CREATED]);
     const paneRecords: PaneRecord[] = [];
@@ -190,7 +189,14 @@ export async function collectSessions(
       // quiet pane costs a stat rather than a 256 KB read every tick.
       const auto = claude ? autoRecapCached(claude.cwd, claude.sessionId) : null;
 
-      paneRecords.push({ paneIndex: pane.paneIndex, panePid: pane.panePid, status, claude, auto });
+      paneRecords.push({
+        windowIndex: pane.windowIndex,
+        paneIndex: pane.paneIndex,
+        panePid: pane.panePid,
+        status,
+        claude,
+        auto,
+      });
     }
 
     const opts = row.options;

@@ -19,6 +19,7 @@ import {
   MIN_SEGMENT_W,
   SEGMENT_SEPARATOR,
   STATUS_STYLES,
+  comparePanePosition,
   type PaneRecord,
   type SessionRecord,
   type Status,
@@ -163,6 +164,18 @@ function oneLine(s: string): string {
 }
 
 /**
+ * Width of the name column for a box `width` columns wide.
+ *
+ * Shared between `layoutRow` and `layoutDeepRow` so the two layouts cannot
+ * drift apart — a DEEP WORK row sits in the same box as WORK/QUICK/etc rows,
+ * and a name column that stepped sideways between them would be the one
+ * alignment the eye actually uses when scanning a box.
+ */
+export function nameWidth(width: number): number {
+  return Math.min(16, Math.max(8, Math.floor(width * 0.32)));
+}
+
+/**
  * Lay out one row for a box `width` columns wide.
  *
  * The chrome is fixed — cursor, glyph band, gap, name, pid, context — and the
@@ -171,7 +184,7 @@ function oneLine(s: string): string {
  * two truncated fragments.
  */
 export function layoutRow(record: SessionRecord, width: number): RowLayout {
-  const nameW = Math.min(16, Math.max(8, Math.floor(width * 0.32)));
+  const nameW = nameWidth(width);
   const ctxW = 5;
   // "123456/78901" - two 6-digit pids and the separator, the worst case for a
   // work session's plan+impl panes.
@@ -220,4 +233,99 @@ export function layoutRow(record: SessionRecord, width: number): RowLayout {
   }
 
   return { glyphs: glyphSlots(record), segments, nameW, pidW, ctxW, detailW };
+}
+
+// ---------------------------------------------------------------------------
+// DEEP WORK row: every pane gets its own cell, glyph plus PID
+//
+// A second, independent layout, kept apart from layoutRow/glyphSlots/paneText
+// above so the four existing groups keep today's row byte for byte. A DEEP
+// WORK row is the only row that draws this way.
+// ---------------------------------------------------------------------------
+
+export type CellTier = "pid" | "glyph";
+
+export interface PaneCell {
+  windowIndex: number;
+  paneIndex: number;
+  status: Status;
+  /** Claude Code's own pid, or null when no Claude resolved in that pane. */
+  pid: number | null;
+}
+
+export interface DeepRowLayout {
+  nameW: number;
+  ctxW: number;
+  cells: PaneCell[];
+  tier: CellTier;
+  /** Width of the pid field, sized to the widest pid actually in this row. */
+  pidW: number;
+  /** Set only when not even glyph-only cells fit: the worst pane's status and
+   *  how many panes are not shown. */
+  badge: { status: Status; total: number } | null;
+}
+
+const DEEP_NAME_CELLS_GAP = 3;
+const DEEP_CELLS_CTX_GAP = 3;
+const DEEP_CTX_W = 5;
+/** A stray absurd pid must not blow out the row, and a session with no live
+ *  pid at all still reserves a sane minimum. */
+const PID_W_MIN = 4;
+const PID_W_MAX = 7;
+
+/**
+ * Lay out a DEEP WORK row: one cell per pane, glyph plus PID where there is
+ * room, glyph-only where there is not, and a single "worst status ×N" badge
+ * when even that does not fit.
+ *
+ * ceiling: unlike layoutRow, this row has no leading GLYPH_W * GLYPH_SLOTS + 1
+ * glyph band in front of the name — see row.ts's glyphSlots doc for why every
+ * other group keeps that band. DEEP WORK trades the alignment for a whole
+ * extra cell of room at narrow widths, which is the layout picked for it.
+ */
+export function layoutDeepRow(record: SessionRecord, width: number): DeepRowLayout {
+  const nameW = nameWidth(width);
+  const ctxW = DEEP_CTX_W;
+  const available = Math.max(
+    0,
+    width - 1 - nameW - DEEP_NAME_CELLS_GAP - DEEP_CELLS_CTX_GAP - ctxW,
+  );
+
+  const panes = [...record.panes].sort(comparePanePosition);
+  const n = panes.length;
+
+  const pidLens = panes
+    .map((p) => p.claude?.pid)
+    .filter((p): p is number => typeof p === "number")
+    .map((p) => String(p).length);
+  const pidW = Math.min(
+    PID_W_MAX,
+    Math.max(PID_W_MIN, pidLens.length > 0 ? Math.max(...pidLens) : PID_W_MIN),
+  );
+
+  const cells: PaneCell[] = panes.map((p) => ({
+    windowIndex: p.windowIndex,
+    paneIndex: p.paneIndex,
+    status: p.status,
+    pid: p.claude?.pid ?? null,
+  }));
+
+  const pidBand = n * (GLYPH_W + pidW);
+  const glyphBand = n * GLYPH_W;
+
+  if (pidBand <= available) {
+    return { nameW, ctxW, cells, tier: "pid", pidW, badge: null };
+  }
+  if (glyphBand <= available) {
+    return { nameW, ctxW, cells, tier: "glyph", pidW, badge: null };
+  }
+  const worst = worstPane(panes);
+  return {
+    nameW,
+    ctxW,
+    cells: [],
+    tier: "glyph",
+    pidW,
+    badge: { status: worst?.status ?? "dead", total: n },
+  };
 }

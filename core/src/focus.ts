@@ -13,7 +13,7 @@
  * reachable, whether or not anything is running in it, and the box the cursor is
  * on is a fact about the cursor rather than a fact about the sessions.
  */
-import { MODE_ORDER, type BoxId, type SessionRecord } from "./model.ts";
+import { GROUP_ORDER, groupOf, type BoxId, type DisplayGroup, type SessionRecord } from "./model.ts";
 
 export interface Focus {
   box: BoxId;
@@ -28,15 +28,25 @@ export function initialFocus(boxIds: readonly string[]): Focus {
 }
 
 /**
- * A box's sessions in the order they are drawn: one group per class, in
- * MODE_ORDER. Up/down has to walk the rows in the order the eye sees them, so
+ * A box's sessions in the order they are drawn: one group per display group, in
+ * GROUP_ORDER. Up/down has to walk the rows in the order the eye sees them, so
  * both the renderer and the cursor read that one constant rather than each
  * deriving its own order — which is what kept this correct when two more classes
  * were added.
  */
 export function boxRows(records: readonly SessionRecord[], box: BoxId): SessionRecord[] {
   const inBox = records.filter((r) => r.box === box);
-  return MODE_ORDER.flatMap((mode) => inBox.filter((r) => r.mode === mode));
+  return GROUP_ORDER.flatMap((g) =>
+    inBox.filter((r) => groupOf(r.mode, r.panes.length) === g));
+}
+
+/** The groups a box actually draws a heading for, in order. Shared with the
+ *  renderer and with the height allocator, so all three agree on how many rows
+ *  the box wants. */
+export function boxGroups(records: readonly SessionRecord[], box: BoxId): DisplayGroup[] {
+  const inBox = records.filter((r) => r.box === box);
+  return GROUP_ORDER.filter((g) =>
+    inBox.some((r) => groupOf(r.mode, r.panes.length) === g));
 }
 
 /** The session under the cursor, or null when its box is empty. */
