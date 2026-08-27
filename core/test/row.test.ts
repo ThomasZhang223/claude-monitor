@@ -14,7 +14,9 @@ import {
   FLAG_TINT,
   FOCUS_TINT,
   glyphSlots,
+  layoutDeepRow,
   layoutRow,
+  nameWidth,
   paneText,
   rowBackground,
   tint,
@@ -41,12 +43,30 @@ function away(text: string, at = 1000): AutoRecap {
   return { text, source: "away", at };
 }
 
-function pane(paneIndex: number, status: Status, auto: AutoRecap | null = null): PaneRecord {
+function pane(
+  paneIndex: number,
+  status: Status,
+  auto: AutoRecap | null = null,
+  windowIndex = 0,
+  pid: number | null = null,
+): PaneRecord {
   return {
+    windowIndex,
     paneIndex,
     panePid: 100 + paneIndex,
     status,
-    claude: null,
+    claude:
+      pid === null
+        ? null
+        : {
+            pid,
+            sessionId: `s${windowIndex}.${paneIndex}`,
+            cwd: "/tmp/x",
+            rawStatus: "idle",
+            statusUpdatedAt: null,
+            kind: "interactive",
+            name: null,
+          },
     auto,
   };
 }
@@ -286,4 +306,118 @@ test("rowBackground: matches tint() at the named strength for each state", () =>
   assert.equal(rowBackground("#C9A227", true, false), tint("#C9A227", FOCUS_TINT));
   assert.equal(rowBackground("#C9A227", false, true), tint("#C9A227", FLAG_TINT));
   assert.equal(rowBackground("#C9A227", true, true), tint("#C9A227", FLAG_FOCUS_TINT));
+});
+
+// ---------------------------------------------------------------------------
+// layoutDeepRow
+// ---------------------------------------------------------------------------
+
+function fivePanes(status: Status = "working"): PaneRecord[] {
+  return Array.from({ length: 5 }, (_, i) => pane(i, status, null, 0, 10000 + i));
+}
+
+test("layoutDeepRow: pid tier at WIDE for 2 and 5 panes", () => {
+  for (const n of [2, 5]) {
+    const panes = fivePanes().slice(0, n);
+    const { tier, cells, badge } = layoutDeepRow(record(panes), WIDE);
+    assert.equal(tier, "pid", `n=${n}`);
+    assert.equal(cells.length, n);
+    assert.equal(badge, null);
+  }
+});
+
+test("layoutDeepRow: pid tier at NARROW for 5 panes", () => {
+  // NARROW is two boxes side by side - a work row collapses to one segment
+  // here, but five glyph-plus-pid cells (band 40) still clear it (available 43).
+  const { tier, cells, badge } = layoutDeepRow(record(fivePanes()), NARROW);
+  assert.equal(tier, "pid");
+  assert.equal(cells.length, 5);
+  assert.equal(badge, null);
+});
+
+test("layoutDeepRow: glyph tier at width 60", () => {
+  const { tier, cells, badge } = layoutDeepRow(record(fivePanes()), 60);
+  assert.equal(tier, "glyph");
+  assert.equal(cells.length, 5);
+  assert.equal(badge, null);
+});
+
+test("layoutDeepRow: badge at width 30", () => {
+  const { cells, badge } = layoutDeepRow(record(fivePanes("awaiting")), 30);
+  assert.equal(cells.length, 0);
+  assert.deepEqual(badge, { status: "awaiting", total: 5 });
+});
+
+test("layoutDeepRow: every cell in a row shares one tier", () => {
+  // A ragged row - some cells with pid, some glyph-only - would read as a bug.
+  const panes = [pane(0, "working", null, 0, 1), pane(1, "idle", null, 0, 22222)];
+  const { tier, cells } = layoutDeepRow(record(panes), 60);
+  assert.ok(tier === "pid" || tier === "glyph");
+  assert.equal(cells.length, 2);
+});
+
+test("layoutDeepRow: cells come out in (windowIndex, paneIndex) order from shuffled input", () => {
+  const panes = [
+    pane(1, "idle", null, 1),
+    pane(0, "idle", null, 1),
+    pane(1, "idle", null, 0),
+    pane(0, "idle", null, 0),
+  ];
+  const { cells } = layoutDeepRow(record(panes), WIDE);
+  assert.deepEqual(
+    cells.map((c) => [c.windowIndex, c.paneIndex]),
+    [
+      [0, 0],
+      [0, 1],
+      [1, 0],
+      [1, 1],
+    ],
+  );
+});
+
+test("layoutDeepRow: a pane with no Claude yields pid null and still gets a cell", () => {
+  const panes = [pane(0, "idle"), pane(1, "working", null, 0, 555)];
+  const { cells } = layoutDeepRow(record(panes), WIDE);
+  assert.equal(cells.length, 2);
+  assert.equal(cells[0].pid, null);
+  assert.equal(cells[1].pid, 555);
+});
+
+test("layoutDeepRow: tier gives way at the exact width, not around it", () => {
+  // Walk the width up one column at a time and find where each tier first
+  // fits, mirroring layoutRow's own boundary test above - a threshold that is
+  // off by one produces a row that looks fine at every width except one.
+  const r = record(fivePanes());
+  let firstGlyph = -1;
+  let firstPid = -1;
+  for (let w = 10; w <= 200; w++) {
+    const { tier, cells } = layoutDeepRow(r, w);
+    if (firstGlyph === -1 && cells.length > 0) firstGlyph = w;
+    if (firstPid === -1 && tier === "pid" && cells.length > 0) firstPid = w;
+  }
+  assert.ok(firstGlyph > 0 && firstPid > firstGlyph, `glyph@${firstGlyph} pid@${firstPid}`);
+  assert.equal(layoutDeepRow(r, firstGlyph - 1).cells.length, 0, "one column below: still a badge");
+  assert.ok(layoutDeepRow(r, firstGlyph - 1).badge !== null);
+  assert.equal(layoutDeepRow(r, firstPid - 1).tier, "glyph", "one column below: still glyph-only");
+  assert.equal(layoutDeepRow(r, firstPid - 1).cells.length, 5);
+});
+
+test("layoutDeepRow: chrome plus the cell budget never exceeds the row width", () => {
+  // Same invariant as layoutRow's own overflow test above, extended to the
+  // deep layout across pane counts 0-5. NAME_CELLS_GAP/CELLS_CTX_GAP are
+  // layoutDeepRow's own local constants, duplicated here on purpose - the same
+  // convention layoutRow's own invariant test already uses for its gaps.
+  const NAME_CELLS_GAP = 3;
+  const CELLS_CTX_GAP = 3;
+  for (let n = 0; n <= 5; n++) {
+    const panes = fivePanes().slice(0, n);
+    const r = record(panes);
+    for (let w = 30; w <= 240; w++) {
+      const { nameW, ctxW } = layoutDeepRow(r, w);
+      assert.equal(nameW, nameWidth(w), `width=${w}`);
+      const available = Math.max(0, w - 1 - nameW - NAME_CELLS_GAP - CELLS_CTX_GAP - ctxW);
+      const total = 1 + nameW + NAME_CELLS_GAP + available + CELLS_CTX_GAP + ctxW;
+      if (w >= 60) assert.equal(total, w, `width=${w} panes=${n}`);
+    }
+  }
 });

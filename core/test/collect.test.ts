@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { STARTUP_GRACE_MS, statusForPaneWithoutClaude, worstStatus } from "../src/collect.ts";
-import type { Status } from "../src/model.ts";
+import { comparePanePosition, type Status } from "../src/model.ts";
 
 test("worstStatus: a waiting plan pane is not hidden by a busy implement pane", () => {
   // The whole point of the row status. A work session has two panes; if one is
@@ -56,6 +56,28 @@ test("a pane with no Claude and no creation time reads dead", () => {
   // No @cc_created means the session was not created by us, or predates the
   // option. Without evidence of a recent start, assume it is not starting.
   assert.equal(statusForPaneWithoutClaude(null, 1_000_000), "dead");
+});
+
+// ---------------------------------------------------------------------------
+// comparePanePosition
+//
+// collect.ts sorts a session's panes with this before anything else touches
+// them, so window-then-pane order has to be right before pane 0 even means
+// "the first pane" for a multi-window session.
+// ---------------------------------------------------------------------------
+
+test("comparePanePosition: a later window always sorts after an earlier one", () => {
+  assert.ok(comparePanePosition({ windowIndex: 0, paneIndex: 5 }, { windowIndex: 1, paneIndex: 0 }) < 0);
+  assert.ok(comparePanePosition({ windowIndex: 1, paneIndex: 0 }, { windowIndex: 0, paneIndex: 5 }) > 0);
+});
+
+test("comparePanePosition: within the same window, pane index decides", () => {
+  assert.ok(comparePanePosition({ windowIndex: 0, paneIndex: 0 }, { windowIndex: 0, paneIndex: 1 }) < 0);
+  assert.ok(comparePanePosition({ windowIndex: 0, paneIndex: 1 }, { windowIndex: 0, paneIndex: 0 }) > 0);
+});
+
+test("comparePanePosition: stable on ties", () => {
+  assert.equal(comparePanePosition({ windowIndex: 2, paneIndex: 3 }, { windowIndex: 2, paneIndex: 3 }), 0);
 });
 
 test("a pane blocked on a prompt reads permission, never dead", () => {
