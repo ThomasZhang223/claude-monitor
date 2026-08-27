@@ -185,7 +185,10 @@ export function nameWidth(width: number): number {
  */
 export function layoutRow(record: SessionRecord, width: number): RowLayout {
   const nameW = nameWidth(width);
-  const ctxW = 5;
+  // "100%|100%" - two 3-digit percentages and the separator, the worst case
+  // now that a multi-pane row shows each pane's own context usage rather than
+  // one shared value.
+  const ctxW = 9;
   // "123456/78901" - two 6-digit pids and the separator, the worst case for a
   // work session's plan+impl panes.
   const pidW = 12;
@@ -236,96 +239,99 @@ export function layoutRow(record: SessionRecord, width: number): RowLayout {
 }
 
 // ---------------------------------------------------------------------------
-// DEEP WORK row: every pane gets its own cell, glyph plus PID
+// DEEP WORK row: every pane's glyph, then the name, then every pane's PID,
+// then every pane's context usage - the same glyph/name/pid/ctx column order
+// every other group's row already draws, with a pane list standing in for
+// the single value in the last two slots.
 //
 // A second, independent layout, kept apart from layoutRow/glyphSlots/paneText
 // above so the four existing groups keep today's row byte for byte. A DEEP
 // WORK row is the only row that draws this way.
 // ---------------------------------------------------------------------------
 
-export type CellTier = "pid" | "glyph";
+export type DeepRowTier = "full" | "glyph" | "badge";
 
 export interface PaneCell {
   windowIndex: number;
   paneIndex: number;
   status: Status;
-  /** Claude Code's own pid, or null when no Claude resolved in that pane. */
-  pid: number | null;
 }
 
 export interface DeepRowLayout {
   nameW: number;
-  ctxW: number;
+  /** The glyphs to draw, in (window, pane) order. Empty only in the "badge"
+   *  tier, where a single glyph stands in for all of them. */
   cells: PaneCell[];
-  tier: CellTier;
-  /** Width of the pid field, sized to the widest pid actually in this row. */
-  pidW: number;
-  /** Set only when not even glyph-only cells fit: the worst pane's status and
-   *  how many panes are not shown. */
+  tier: DeepRowTier;
+  /** Every pane's PID, in cell order, joined by "|"; "—" for a pane with no
+   *  Claude resolved, so a position always corresponds to the same glyph.
+   *  Empty outside the "full" tier. */
+  pidText: string;
+  /** Every pane's context-window percentage, in cell order, joined by "|";
+   *  "—" for a pane with no reading yet. Empty outside the "full" tier. */
+  ctxText: string;
+  /** Set only in the "badge" tier: the worst pane's status and how many
+   *  panes it stands for. */
   badge: { status: Status; total: number } | null;
 }
 
-const DEEP_NAME_CELLS_GAP = 3;
-const DEEP_CELLS_CTX_GAP = 3;
-const DEEP_CTX_W = 5;
-/** A stray absurd pid must not blow out the row, and a session with no live
- *  pid at all still reserves a sane minimum. */
-const PID_W_MIN = 4;
-const PID_W_MAX = 7;
+const DEEP_GLYPH_NAME_GAP = 1;
+const DEEP_NAME_PID_GAP = 3;
+const DEEP_PID_CTX_GAP = 3;
 
 /**
- * Lay out a DEEP WORK row: one cell per pane, glyph plus PID where there is
- * room, glyph-only where there is not, and a single "worst status ×N" badge
- * when even that does not fit.
+ * Lay out a DEEP WORK row: every pane's glyph, then the name, then every
+ * pane's PID, then every pane's context usage - full when it all fits,
+ * glyphs-plus-name only when it does not, and a single "worst status ×N"
+ * badge when even the glyphs do not fit.
  *
- * ceiling: unlike layoutRow, this row has no leading GLYPH_W * GLYPH_SLOTS + 1
- * glyph band in front of the name — see row.ts's glyphSlots doc for why every
- * other group keeps that band. DEEP WORK trades the alignment for a whole
- * extra cell of room at narrow widths, which is the layout picked for it.
+ * ceiling: pid and ctx degrade together, not independently - a row shows
+ * both lists or neither, rather than adding a tier for "pid fits, ctx
+ * doesn't". The panes this row is built for top out around 5, so that gap is
+ * small in practice; splitting it into its own tier is the natural follow-on
+ * if a session ever grows enough panes to make it visible.
+ *
+ * ceiling: unlike layoutRow, this row does not right-flush ctx to the box's
+ * far edge - the pid/ctx lists are drawn at their own natural width, so two
+ * DEEP WORK rows in the same box need not end at the same column. See
+ * row.ts's glyphSlots doc for why every OTHER group's row keeps a fixed
+ * band; DEEP WORK already gave up that alignment when it dropped the leading
+ * glyph band, and a content-driven list is a second, per-row misalignment
+ * rather than a budget only the busiest row in the box would ever fill.
  */
 export function layoutDeepRow(record: SessionRecord, width: number): DeepRowLayout {
   const nameW = nameWidth(width);
-  const ctxW = DEEP_CTX_W;
-  const available = Math.max(
-    0,
-    width - 1 - nameW - DEEP_NAME_CELLS_GAP - DEEP_CELLS_CTX_GAP - ctxW,
-  );
-
   const panes = [...record.panes].sort(comparePanePosition);
   const n = panes.length;
-
-  const pidLens = panes
-    .map((p) => p.claude?.pid)
-    .filter((p): p is number => typeof p === "number")
-    .map((p) => String(p).length);
-  const pidW = Math.min(
-    PID_W_MAX,
-    Math.max(PID_W_MIN, pidLens.length > 0 ? Math.max(...pidLens) : PID_W_MIN),
-  );
 
   const cells: PaneCell[] = panes.map((p) => ({
     windowIndex: p.windowIndex,
     paneIndex: p.paneIndex,
     status: p.status,
-    pid: p.claude?.pid ?? null,
   }));
+  const pidText = panes.map((p) => (p.claude ? String(p.claude.pid) : "—")).join("|");
+  const ctxText = panes.map((p) => (p.contextPct === null ? "—" : `${p.contextPct}%`)).join("|");
 
-  const pidBand = n * (GLYPH_W + pidW);
-  const glyphBand = n * GLYPH_W;
+  const glyphNameWidth = 1 + n * GLYPH_W + DEEP_GLYPH_NAME_GAP + nameW;
+  const fullWidth =
+    glyphNameWidth + DEEP_NAME_PID_GAP + pidText.length + DEEP_PID_CTX_GAP + ctxText.length;
 
-  if (pidBand <= available) {
-    return { nameW, ctxW, cells, tier: "pid", pidW, badge: null };
+  if (fullWidth <= width) {
+    return { nameW, cells, tier: "full", pidText, ctxText, badge: null };
   }
-  if (glyphBand <= available) {
-    return { nameW, ctxW, cells, tier: "glyph", pidW, badge: null };
+  if (glyphNameWidth <= width) {
+    return { nameW, cells, tier: "glyph", pidText: "", ctxText: "", badge: null };
   }
+  // Below this the badge itself may not fit either - matching layoutRow's own
+  // floor, which likewise stops degrading and simply overflows below the
+  // width its tests actually cover (see row.test.ts's `w >= 60` guard).
   const worst = worstPane(panes);
   return {
     nameW,
-    ctxW,
     cells: [],
-    tier: "glyph",
-    pidW,
+    tier: "badge",
+    pidText: "",
+    ctxText: "",
     badge: { status: worst?.status ?? "dead", total: n },
   };
 }

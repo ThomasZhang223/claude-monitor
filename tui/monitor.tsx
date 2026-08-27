@@ -261,7 +261,10 @@ function SessionRow({
   // column live there too, so both sides of the arithmetic stay in one place.
   const { glyphs, segments, nameW, pidW, ctxW } = layoutRow(record, width);
 
-  const ctx = record.contextPct === null ? "" : `${record.contextPct}%`;
+  // Each pane's own context usage, joined by "|" so a two-pane session shows
+  // both instead of whichever pane's snapshot happened to be read first - "—"
+  // for a pane with no reading yet, so the join still lines up positionally.
+  const ctx = record.panes.map((p) => (p.contextPct === null ? "—" : `${p.contextPct}%`)).join("|");
 
   // Claude Code's own process id(s), NOT the tmux pane's - one per pane still
   // resolved, in pane order (plan then implement).
@@ -312,13 +315,14 @@ function SessionRow({
 }
 
 /**
- * A DEEP WORK row: one cell per pane, glyph plus PID where there is room.
+ * A DEEP WORK row: every pane's glyph, then the name, then every pane's PID,
+ * then every pane's context usage - the same glyph/name/pid/ctx order every
+ * other group's row already draws.
  *
- * Markup only over `layoutDeepRow` - see row.ts for the arithmetic. This has
- * no glyph band in front of the name (see layoutDeepRow's own ceiling note),
- * so the cell region is padded out to the same "available" budget
- * layoutDeepRow computed, keeping ctx flush against the row's right edge
- * whichever tier ends up drawn.
+ * Markup only over `layoutDeepRow` - see row.ts for the arithmetic. Unlike
+ * SessionRow, the pid/ctx text is not padded to a fixed column: see
+ * layoutDeepRow's own ceiling note on why this row does not right-flush ctx
+ * to the box's edge.
  */
 function DeepWorkRow({
   record,
@@ -340,58 +344,46 @@ function DeepWorkRow({
 
   // Duplicated from layoutDeepRow's own local constants on purpose - the same
   // convention SessionRow already uses for layoutRow's NAME_PID_GAP/PID_DETAIL_GAP.
-  const NAME_CELLS_GAP = 3;
-  const CELLS_CTX_GAP = 3;
-  const available = Math.max(
-    0,
-    width - 1 - layout.nameW - NAME_CELLS_GAP - CELLS_CTX_GAP - layout.ctxW,
-  );
-  const usedWidth = layout.badge
-    ? GLYPH_W + 3
-    : layout.tier === "pid"
-      ? layout.cells.length * (GLYPH_W + layout.pidW)
-      : layout.cells.length * GLYPH_W;
-  const fillerWidth = Math.max(0, available - usedWidth);
-
-  const ctx = record.contextPct === null ? "" : `${record.contextPct}%`;
+  const GLYPH_NAME_GAP = 1;
+  const NAME_PID_GAP = 3;
+  const PID_CTX_GAP = 3;
 
   return (
     <Box>
       <Text backgroundColor={bg}>{focused ? "▸" : " "}</Text>
-      <Text bold={focused} backgroundColor={bg}>{pad(record.label, layout.nameW)}</Text>
-      <Text backgroundColor={bg}>{" ".repeat(NAME_CELLS_GAP)}</Text>
-      {layout.badge ? (
-        <>
+      {layout.tier === "badge" ? (
+        <StatusGlyph
+          status={layout.badge!.status}
+          boxColor={boxColor}
+          frame={frame}
+          blinkOn={blinkOn}
+          backgroundColor={bg}
+        />
+      ) : (
+        layout.cells.map((cell: PaneCell) => (
           <StatusGlyph
-            status={layout.badge.status}
+            key={`${cell.windowIndex}.${cell.paneIndex}`}
+            status={cell.status}
             boxColor={boxColor}
             frame={frame}
             blinkOn={blinkOn}
             backgroundColor={bg}
           />
-          <Text backgroundColor={bg}>{` ×${layout.badge.total}`}</Text>
-        </>
-      ) : (
-        layout.cells.map((cell: PaneCell) => (
-          <React.Fragment key={`${cell.windowIndex}.${cell.paneIndex}`}>
-            <StatusGlyph
-              status={cell.status}
-              boxColor={boxColor}
-              frame={frame}
-              blinkOn={blinkOn}
-              backgroundColor={bg}
-            />
-            {layout.tier === "pid" ? (
-              <Text dimColor backgroundColor={bg}>
-                {pad(cell.pid === null ? "—" : String(cell.pid), layout.pidW)}
-              </Text>
-            ) : null}
-          </React.Fragment>
         ))
       )}
-      <Text backgroundColor={bg}>{" ".repeat(fillerWidth)}</Text>
-      <Text backgroundColor={bg}>{" ".repeat(CELLS_CTX_GAP)}</Text>
-      <Text dimColor backgroundColor={bg}>{ctx.padStart(layout.ctxW)}</Text>
+      {layout.tier === "badge" ? (
+        <Text backgroundColor={bg}>{` ×${layout.badge!.total}`}</Text>
+      ) : null}
+      <Text backgroundColor={bg}>{" ".repeat(GLYPH_NAME_GAP)}</Text>
+      <Text bold={focused} backgroundColor={bg}>{pad(record.label, layout.nameW)}</Text>
+      {layout.tier === "full" ? (
+        <>
+          <Text backgroundColor={bg}>{" ".repeat(NAME_PID_GAP)}</Text>
+          <Text dimColor backgroundColor={bg}>{layout.pidText}</Text>
+          <Text backgroundColor={bg}>{" ".repeat(PID_CTX_GAP)}</Text>
+          <Text dimColor backgroundColor={bg}>{layout.ctxText}</Text>
+        </>
+      ) : null}
     </Box>
   );
 }

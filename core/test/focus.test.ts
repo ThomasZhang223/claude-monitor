@@ -21,6 +21,7 @@ function record(box: BoxId, mode: Mode, slug: string, paneCount = 0): SessionRec
     status: "idle",
     claude: null,
     auto: null,
+    contextPct: null,
   }));
   return {
     tmuxName: `cc-${box}-${mode}-${slug}`,

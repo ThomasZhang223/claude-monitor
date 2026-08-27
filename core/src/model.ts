@@ -369,6 +369,10 @@ export interface PaneRecord {
    *  per session because the two panes of a work session are separate
    *  processes with separate accounts of themselves. */
   auto: AutoRecap | null;
+  /** Context-window percentage from this pane's own statusline snapshot, for
+   *  the same reason `auto` is per pane: a work session's two panes are
+   *  separate Claude processes with independent context usage. */
+  contextPct: number | null;
 }
 
 /** Where an unpublished recap came from, which decides how it is presented. */

@@ -165,12 +165,15 @@ export async function collectSessions(
 
       let hook: HookStatus | null = null;
       let transcriptMtime: number | null = null;
+      // This pane's own statusline snapshot - read per pane, not just once for
+      // the session, so a work session's two panes each show their own
+      // context usage rather than both echoing the plan pane's.
+      let paneSnap: UsageSnapshot | null = null;
       if (claude) {
         hook = await readHookStatus(claude.sessionId, fs);
         transcriptMtime = await ownTranscriptMtime(claude.cwd, claude.sessionId, fs);
-        if (snap === null) {
-          snap = await sessionSnapshot(claude.sessionId, deps.usage);
-        }
+        paneSnap = await sessionSnapshot(claude.sessionId, deps.usage);
+        if (snap === null) snap = paneSnap;
       }
 
       const status = claude
@@ -196,6 +199,7 @@ export async function collectSessions(
         status,
         claude,
         auto,
+        contextPct: paneSnap?.contextPct ?? null,
       });
     }
 

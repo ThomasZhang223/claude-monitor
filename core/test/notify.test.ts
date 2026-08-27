@@ -65,6 +65,7 @@ function pane(
     status,
     claude: hasClaude ? claude({ sessionId: `s${paneIndex}` }) : null,
     auto,
+    contextPct: null,
   };
 }
 

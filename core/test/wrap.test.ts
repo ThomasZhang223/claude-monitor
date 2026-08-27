@@ -50,6 +50,7 @@ function pane(paneIndex: number, sessionId: string | null, windowIndex = 0): Pan
     status: "idle",
     claude: sessionId === null ? null : claude({ sessionId }),
     auto: null,
+    contextPct: null,
   };
 }
 

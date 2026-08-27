@@ -49,6 +49,7 @@ function pane(
   auto: AutoRecap | null = null,
   windowIndex = 0,
   pid: number | null = null,
+  contextPct: number | null = null,
 ): PaneRecord {
   return {
     windowIndex,
@@ -68,6 +69,7 @@ function pane(
             name: null,
           },
     auto,
+    contextPct,
   };
 }
 
@@ -312,48 +314,47 @@ test("rowBackground: matches tint() at the named strength for each state", () =>
 // layoutDeepRow
 // ---------------------------------------------------------------------------
 
+/** Five panes, 5-digit pids and 2-digit context percentages, so the joined
+ *  pid/ctx text is realistically wide rather than a best case. */
 function fivePanes(status: Status = "working"): PaneRecord[] {
-  return Array.from({ length: 5 }, (_, i) => pane(i, status, null, 0, 10000 + i));
+  return Array.from({ length: 5 }, (_, i) => pane(i, status, null, 0, 10000 + i, 10 + i));
 }
 
-test("layoutDeepRow: pid tier at WIDE for 2 and 5 panes", () => {
-  for (const n of [2, 5]) {
-    const panes = fivePanes().slice(0, n);
-    const { tier, cells, badge } = layoutDeepRow(record(panes), WIDE);
-    assert.equal(tier, "pid", `n=${n}`);
-    assert.equal(cells.length, n);
-    assert.equal(badge, null);
-  }
-});
-
-test("layoutDeepRow: pid tier at NARROW for 5 panes", () => {
-  // NARROW is two boxes side by side - a work row collapses to one segment
-  // here, but five glyph-plus-pid cells (band 40) still clear it (available 43).
-  const { tier, cells, badge } = layoutDeepRow(record(fivePanes()), NARROW);
-  assert.equal(tier, "pid");
+test("layoutDeepRow: full tier shows glyphs, name, then PIDs and contexts joined by |", () => {
+  const { tier, cells, pidText, ctxText, badge } = layoutDeepRow(record(fivePanes()), WIDE);
+  assert.equal(tier, "full");
   assert.equal(cells.length, 5);
+  assert.equal(pidText, "10000|10001|10002|10003|10004");
+  assert.equal(ctxText, "10%|11%|12%|13%|14%");
   assert.equal(badge, null);
 });
 
-test("layoutDeepRow: glyph tier at width 60", () => {
-  const { tier, cells, badge } = layoutDeepRow(record(fivePanes()), 60);
+test("layoutDeepRow: a pane with no Claude, or no reading yet, shows — in its slot", () => {
+  // "—" rather than dropping the entry, so a position in the list always
+  // corresponds to the same glyph - filtering it out would shift every pid
+  // after it one slot to the left of the glyph it actually belongs to.
+  const panes = [pane(0, "idle"), pane(1, "working", null, 0, 555, 40)];
+  const { pidText, ctxText } = layoutDeepRow(record(panes), WIDE);
+  assert.equal(pidText, "—|555");
+  assert.equal(ctxText, "—|40%");
+});
+
+test("layoutDeepRow: glyph tier keeps every glyph but drops the PID and ctx lists", () => {
+  // NARROW (two boxes side by side) is wide enough for five glyphs and the
+  // name, but not for five 5-digit pids and five percentages joined by "|"
+  // as well.
+  const { tier, cells, pidText, ctxText, badge } = layoutDeepRow(record(fivePanes()), NARROW);
   assert.equal(tier, "glyph");
   assert.equal(cells.length, 5);
+  assert.equal(pidText, "");
+  assert.equal(ctxText, "");
   assert.equal(badge, null);
 });
 
-test("layoutDeepRow: badge at width 30", () => {
-  const { cells, badge } = layoutDeepRow(record(fivePanes("awaiting")), 30);
+test("layoutDeepRow: badge at a width too narrow even for five glyphs", () => {
+  const { cells, badge } = layoutDeepRow(record(fivePanes("awaiting")), 20);
   assert.equal(cells.length, 0);
   assert.deepEqual(badge, { status: "awaiting", total: 5 });
-});
-
-test("layoutDeepRow: every cell in a row shares one tier", () => {
-  // A ragged row - some cells with pid, some glyph-only - would read as a bug.
-  const panes = [pane(0, "working", null, 0, 1), pane(1, "idle", null, 0, 22222)];
-  const { tier, cells } = layoutDeepRow(record(panes), 60);
-  assert.ok(tier === "pid" || tier === "glyph");
-  assert.equal(cells.length, 2);
 });
 
 test("layoutDeepRow: cells come out in (windowIndex, paneIndex) order from shuffled input", () => {
@@ -375,12 +376,15 @@ test("layoutDeepRow: cells come out in (windowIndex, paneIndex) order from shuff
   );
 });
 
-test("layoutDeepRow: a pane with no Claude yields pid null and still gets a cell", () => {
-  const panes = [pane(0, "idle"), pane(1, "working", null, 0, 555)];
-  const { cells } = layoutDeepRow(record(panes), WIDE);
-  assert.equal(cells.length, 2);
-  assert.equal(cells[0].pid, null);
-  assert.equal(cells[1].pid, 555);
+test("layoutDeepRow: the PID and ctx lists follow the same order as the glyphs", () => {
+  const panes = [
+    pane(1, "idle", null, 0, 222, 20),
+    pane(0, "idle", null, 0, 111, 10),
+  ];
+  const { cells, pidText, ctxText } = layoutDeepRow(record(panes), WIDE);
+  assert.deepEqual(cells.map((c) => c.paneIndex), [0, 1]);
+  assert.equal(pidText, "111|222");
+  assert.equal(ctxText, "10%|20%");
 });
 
 test("layoutDeepRow: tier gives way at the exact width, not around it", () => {
@@ -389,35 +393,41 @@ test("layoutDeepRow: tier gives way at the exact width, not around it", () => {
   // off by one produces a row that looks fine at every width except one.
   const r = record(fivePanes());
   let firstGlyph = -1;
-  let firstPid = -1;
+  let firstFull = -1;
   for (let w = 10; w <= 200; w++) {
     const { tier, cells } = layoutDeepRow(r, w);
     if (firstGlyph === -1 && cells.length > 0) firstGlyph = w;
-    if (firstPid === -1 && tier === "pid" && cells.length > 0) firstPid = w;
+    if (firstFull === -1 && tier === "full") firstFull = w;
   }
-  assert.ok(firstGlyph > 0 && firstPid > firstGlyph, `glyph@${firstGlyph} pid@${firstPid}`);
+  assert.ok(firstGlyph > 0 && firstFull > firstGlyph, `glyph@${firstGlyph} full@${firstFull}`);
   assert.equal(layoutDeepRow(r, firstGlyph - 1).cells.length, 0, "one column below: still a badge");
   assert.ok(layoutDeepRow(r, firstGlyph - 1).badge !== null);
-  assert.equal(layoutDeepRow(r, firstPid - 1).tier, "glyph", "one column below: still glyph-only");
-  assert.equal(layoutDeepRow(r, firstPid - 1).cells.length, 5);
+  assert.equal(layoutDeepRow(r, firstFull - 1).tier, "glyph", "one column below: still glyph-only");
+  assert.equal(layoutDeepRow(r, firstFull - 1).cells.length, 5);
 });
 
-test("layoutDeepRow: chrome plus the cell budget never exceeds the row width", () => {
-  // Same invariant as layoutRow's own overflow test above, extended to the
-  // deep layout across pane counts 0-5. NAME_CELLS_GAP/CELLS_CTX_GAP are
-  // layoutDeepRow's own local constants, duplicated here on purpose - the same
-  // convention layoutRow's own invariant test already uses for its gaps.
-  const NAME_CELLS_GAP = 3;
-  const CELLS_CTX_GAP = 3;
+test("layoutDeepRow: never draws past the row width, across pane counts 0-5", () => {
+  // The badge tier's own total is 1 (cursor) + 6 (glyph + "×N") + 1 (gap) +
+  // nameW, and nameW floors at 8 - so 16 is the narrowest width every pane
+  // count can be drawn at without overflowing; below it this accepts the same
+  // floor layoutRow's own invariant test does (see its `w >= 60` guard).
+  const GLYPH_NAME_GAP = 1;
+  const NAME_PID_GAP = 3;
+  const PID_CTX_GAP = 3;
   for (let n = 0; n <= 5; n++) {
     const panes = fivePanes().slice(0, n);
     const r = record(panes);
-    for (let w = 30; w <= 240; w++) {
-      const { nameW, ctxW } = layoutDeepRow(r, w);
+    for (let w = 16; w <= 240; w++) {
+      const { nameW, cells, tier, pidText, ctxText } = layoutDeepRow(r, w);
       assert.equal(nameW, nameWidth(w), `width=${w}`);
-      const available = Math.max(0, w - 1 - nameW - NAME_CELLS_GAP - CELLS_CTX_GAP - ctxW);
-      const total = 1 + nameW + NAME_CELLS_GAP + available + CELLS_CTX_GAP + ctxW;
-      if (w >= 60) assert.equal(total, w, `width=${w} panes=${n}`);
+      const glyphOrBadgeW = tier === "badge" ? GLYPH_W + 3 : cells.length * GLYPH_W;
+      const drawn =
+        1 +
+        glyphOrBadgeW +
+        GLYPH_NAME_GAP +
+        nameW +
+        (tier === "full" ? NAME_PID_GAP + pidText.length + PID_CTX_GAP + ctxText.length : 0);
+      assert.ok(drawn <= w, `overflow at width=${w} panes=${n}: drawn=${drawn}`);
     }
   }
 });
