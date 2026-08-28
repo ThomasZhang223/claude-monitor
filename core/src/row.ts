@@ -187,8 +187,11 @@ export function layoutRow(record: SessionRecord, width: number): RowLayout {
   const nameW = nameWidth(width);
   // "100%|100%" - two 3-digit percentages and the separator, the worst case
   // now that a multi-pane row shows each pane's own context usage rather than
-  // one shared value.
-  const ctxW = 9;
+  // one shared value. Only sized up for a session that actually has two
+  // panes: taxing every single-pane row (q/quick/research, the common case)
+  // for a budget only a work session needs pushes the detail band's own
+  // floor into a width that used to be safe.
+  const ctxW = record.panes.length >= 2 ? 9 : 5;
   // "123456/78901" - two 6-digit pids and the separator, the worst case for a
   // work session's plan+impl panes.
   const pidW = 12;
@@ -270,6 +273,18 @@ export interface DeepRowLayout {
   /** Every pane's context-window percentage, in cell order, joined by "|";
    *  "—" for a pane with no reading yet. Empty outside the "full" tier. */
   ctxText: string;
+  /** Spaces between the PID list and `ctxText` that right-flush ctx to this
+   *  row's own width, the same way layoutRow's ctx column always ends flush
+   *  against the box. Meaningful only in the "full" tier - 0 otherwise, since
+   *  neither list is drawn there. */
+  fillerWidth: number;
+  /** The first pane's own account of itself (`paneText`, the same fallback a
+   *  split WORK segment uses) - drawn on a second line under this one. The
+   *  first pane, in (window, pane) order, is the plan pane for a work
+   *  session that outgrew two panels, so this is its most useful single
+   *  recap. Never used to size anything above - see the module doc on
+   *  DeepWorkRow needing two lines of box height per session. */
+  recap: string;
   /** Set only in the "badge" tier: the worst pane's status and how many
    *  panes it stands for. */
   badge: { status: Status; total: number } | null;
@@ -281,23 +296,16 @@ const DEEP_PID_CTX_GAP = 3;
 
 /**
  * Lay out a DEEP WORK row: every pane's glyph, then the name, then every
- * pane's PID, then every pane's context usage - full when it all fits,
- * glyphs-plus-name only when it does not, and a single "worst status ×N"
- * badge when even the glyphs do not fit.
+ * pane's PID, then every pane's context usage, then the plan pane's own
+ * recap on a second line - full when the first line's lists fit, glyphs-
+ * plus-name only when they do not, and a single "worst status ×N" badge when
+ * even the glyphs do not fit. The recap line draws regardless of tier.
  *
  * ceiling: pid and ctx degrade together, not independently - a row shows
  * both lists or neither, rather than adding a tier for "pid fits, ctx
  * doesn't". The panes this row is built for top out around 5, so that gap is
  * small in practice; splitting it into its own tier is the natural follow-on
  * if a session ever grows enough panes to make it visible.
- *
- * ceiling: unlike layoutRow, this row does not right-flush ctx to the box's
- * far edge - the pid/ctx lists are drawn at their own natural width, so two
- * DEEP WORK rows in the same box need not end at the same column. See
- * row.ts's glyphSlots doc for why every OTHER group's row keeps a fixed
- * band; DEEP WORK already gave up that alignment when it dropped the leading
- * glyph band, and a content-driven list is a second, per-row misalignment
- * rather than a budget only the busiest row in the box would ever fill.
  */
 export function layoutDeepRow(record: SessionRecord, width: number): DeepRowLayout {
   const nameW = nameWidth(width);
@@ -311,16 +319,29 @@ export function layoutDeepRow(record: SessionRecord, width: number): DeepRowLayo
   }));
   const pidText = panes.map((p) => (p.claude ? String(p.claude.pid) : "—")).join("|");
   const ctxText = panes.map((p) => (p.contextPct === null ? "—" : `${p.contextPct}%`)).join("|");
+  const recap = panes.length > 0 ? paneText(panes[0]) : "";
 
   const glyphNameWidth = 1 + n * GLYPH_W + DEEP_GLYPH_NAME_GAP + nameW;
-  const fullWidth =
-    glyphNameWidth + DEEP_NAME_PID_GAP + pidText.length + DEEP_PID_CTX_GAP + ctxText.length;
+  const beforeCtx = glyphNameWidth + DEEP_NAME_PID_GAP + pidText.length;
+  const fullWidth = beforeCtx + DEEP_PID_CTX_GAP + ctxText.length;
 
   if (fullWidth <= width) {
-    return { nameW, cells, tier: "full", pidText, ctxText, badge: null };
+    // Always >= DEEP_PID_CTX_GAP, since fullWidth <= width already accounts
+    // for that minimum - the rest goes to right-flushing ctx exactly.
+    const fillerWidth = width - beforeCtx - ctxText.length;
+    return { nameW, cells, tier: "full", pidText, ctxText, fillerWidth, recap, badge: null };
   }
   if (glyphNameWidth <= width) {
-    return { nameW, cells, tier: "glyph", pidText: "", ctxText: "", badge: null };
+    return {
+      nameW,
+      cells,
+      tier: "glyph",
+      pidText: "",
+      ctxText: "",
+      fillerWidth: 0,
+      recap,
+      badge: null,
+    };
   }
   // Below this the badge itself may not fit either - matching layoutRow's own
   // floor, which likewise stops degrading and simply overflows below the
@@ -332,6 +353,8 @@ export function layoutDeepRow(record: SessionRecord, width: number): DeepRowLayo
     tier: "badge",
     pidText: "",
     ctxText: "",
+    fillerWidth: 0,
+    recap,
     badge: { status: worst?.status ?? "dead", total: n },
   };
 }

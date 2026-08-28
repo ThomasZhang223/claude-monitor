@@ -216,6 +216,20 @@ test("layoutRow: chrome plus segments never exceeds the row width", () => {
   }
 });
 
+test("layoutRow: a single-pane row does not pay the two-pane ctx budget", () => {
+  // ctxW only grows to fit a joined two-value ctx list when the record
+  // actually has two panes - taxing every one-pane row (q/quick/research,
+  // the common case) for a budget only a work session needs is what pushed
+  // this row's own floor into a width (56) that used to render on one line.
+  assert.equal(layoutRow(record([pane(0, "idle")]), 56).ctxW, 5);
+  assert.equal(layoutRow(record([pane(0, "idle"), pane(1, "idle")]), 56).ctxW, 9);
+  // And the invariant this regression broke: a single-pane row at that exact
+  // width still lands flush, where a two-pane row is allowed to hit the floor.
+  const { segments, nameW, pidW, ctxW } = layoutRow(record([pane(0, "idle")]), 56);
+  const total = 1 + GLYPH_W * GLYPH_SLOTS + 1 + nameW + 3 + pidW + 3 + segments[0].width + ctxW;
+  assert.equal(total, 56);
+});
+
 // ---------------------------------------------------------------------------
 // Text selection
 // ---------------------------------------------------------------------------
@@ -406,28 +420,63 @@ test("layoutDeepRow: tier gives way at the exact width, not around it", () => {
   assert.equal(layoutDeepRow(r, firstFull - 1).cells.length, 5);
 });
 
-test("layoutDeepRow: never draws past the row width, across pane counts 0-5", () => {
+test("layoutDeepRow: never draws past the row width, and the full tier lands exactly on it", () => {
   // The badge tier's own total is 1 (cursor) + 6 (glyph + "×N") + 1 (gap) +
   // nameW, and nameW floors at 8 - so 16 is the narrowest width every pane
   // count can be drawn at without overflowing; below it this accepts the same
   // floor layoutRow's own invariant test does (see its `w >= 60` guard).
   const GLYPH_NAME_GAP = 1;
   const NAME_PID_GAP = 3;
-  const PID_CTX_GAP = 3;
   for (let n = 0; n <= 5; n++) {
     const panes = fivePanes().slice(0, n);
     const r = record(panes);
     for (let w = 16; w <= 240; w++) {
-      const { nameW, cells, tier, pidText, ctxText } = layoutDeepRow(r, w);
+      const { nameW, cells, tier, pidText, ctxText, fillerWidth } = layoutDeepRow(r, w);
       assert.equal(nameW, nameWidth(w), `width=${w}`);
       const glyphOrBadgeW = tier === "badge" ? GLYPH_W + 3 : cells.length * GLYPH_W;
-      const drawn =
+      const beforeCtx =
         1 +
         glyphOrBadgeW +
         GLYPH_NAME_GAP +
         nameW +
-        (tier === "full" ? NAME_PID_GAP + pidText.length + PID_CTX_GAP + ctxText.length : 0);
-      assert.ok(drawn <= w, `overflow at width=${w} panes=${n}: drawn=${drawn}`);
+        (tier === "full" ? NAME_PID_GAP + pidText.length : 0);
+      if (tier === "full") {
+        // Right-flushed: filler plus ctx always lands exactly on the width.
+        assert.equal(beforeCtx + fillerWidth + ctxText.length, w, `width=${w} panes=${n}`);
+      } else {
+        assert.ok(beforeCtx <= w, `overflow at width=${w} panes=${n}: drawn=${beforeCtx}`);
+      }
     }
   }
+});
+
+test("layoutDeepRow: ctx is right-flushed to the row's own width in the full tier", () => {
+  const panes = [pane(0, "idle", null, 0, 1, 5), pane(1, "idle", null, 0, 2, 6)];
+  const width = 80;
+  const { tier, nameW, pidText, ctxText, fillerWidth } = layoutDeepRow(record(panes), width);
+  assert.equal(tier, "full");
+  const drawn = 1 + 2 * GLYPH_W + 1 + nameW + 3 + pidText.length + fillerWidth + ctxText.length;
+  assert.equal(drawn, width);
+});
+
+test("layoutDeepRow: recap is the first pane's own account of itself, plan before implement", () => {
+  const panes = [
+    pane(0, "idle", away("plan pane recap")),
+    pane(1, "working", away("impl pane recap")),
+  ];
+  assert.equal(layoutDeepRow(record(panes), WIDE).recap, "plan pane recap");
+});
+
+test("layoutDeepRow: recap follows (window, pane) order, not array order", () => {
+  const panes = [pane(1, "idle", away("second pane")), pane(0, "idle", away("first pane"))];
+  assert.equal(layoutDeepRow(record(panes), WIDE).recap, "first pane");
+});
+
+test("layoutDeepRow: recap falls back to the status label, like a split WORK segment does", () => {
+  const panes = [pane(0, "working"), pane(1, "idle")];
+  assert.equal(layoutDeepRow(record(panes), WIDE).recap, "working");
+});
+
+test("layoutDeepRow: recap is empty for a session with no panes at all", () => {
+  assert.equal(layoutDeepRow(record([]), WIDE).recap, "");
 });

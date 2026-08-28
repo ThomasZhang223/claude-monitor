@@ -316,13 +316,16 @@ function SessionRow({
 
 /**
  * A DEEP WORK row: every pane's glyph, then the name, then every pane's PID,
- * then every pane's context usage - the same glyph/name/pid/ctx order every
- * other group's row already draws.
+ * then every pane's context usage flush against the box's right edge - the
+ * same glyph/name/pid/ctx order and right-flushed ctx every other group's
+ * row already draws. A second line under it carries the plan pane's own
+ * recap, since a row with several panes has no room left to show it inline.
  *
- * Markup only over `layoutDeepRow` - see row.ts for the arithmetic. Unlike
- * SessionRow, the pid/ctx text is not padded to a fixed column: see
- * layoutDeepRow's own ceiling note on why this row does not right-flush ctx
- * to the box's edge.
+ * Two Ink `Box` lines, not one - see layoutDeepRow's own doc on why the
+ * height this needs is 2, not 1, which `Dashboard`'s box-height weighting
+ * (the `counts` computation) has to account for.
+ *
+ * Markup only over `layoutDeepRow` - see row.ts for the arithmetic.
  */
 function DeepWorkRow({
   record,
@@ -346,45 +349,50 @@ function DeepWorkRow({
   // convention SessionRow already uses for layoutRow's NAME_PID_GAP/PID_DETAIL_GAP.
   const GLYPH_NAME_GAP = 1;
   const NAME_PID_GAP = 3;
-  const PID_CTX_GAP = 3;
 
   return (
-    <Box>
-      <Text backgroundColor={bg}>{focused ? "▸" : " "}</Text>
-      {layout.tier === "badge" ? (
-        <StatusGlyph
-          status={layout.badge!.status}
-          boxColor={boxColor}
-          frame={frame}
-          blinkOn={blinkOn}
-          backgroundColor={bg}
-        />
-      ) : (
-        layout.cells.map((cell: PaneCell) => (
+    <>
+      <Box>
+        <Text backgroundColor={bg}>{focused ? "▸" : " "}</Text>
+        {layout.tier === "badge" ? (
           <StatusGlyph
-            key={`${cell.windowIndex}.${cell.paneIndex}`}
-            status={cell.status}
+            status={layout.badge!.status}
             boxColor={boxColor}
             frame={frame}
             blinkOn={blinkOn}
             backgroundColor={bg}
           />
-        ))
-      )}
-      {layout.tier === "badge" ? (
-        <Text backgroundColor={bg}>{` ×${layout.badge!.total}`}</Text>
-      ) : null}
-      <Text backgroundColor={bg}>{" ".repeat(GLYPH_NAME_GAP)}</Text>
-      <Text bold={focused} backgroundColor={bg}>{pad(record.label, layout.nameW)}</Text>
-      {layout.tier === "full" ? (
-        <>
-          <Text backgroundColor={bg}>{" ".repeat(NAME_PID_GAP)}</Text>
-          <Text dimColor backgroundColor={bg}>{layout.pidText}</Text>
-          <Text backgroundColor={bg}>{" ".repeat(PID_CTX_GAP)}</Text>
-          <Text dimColor backgroundColor={bg}>{layout.ctxText}</Text>
-        </>
-      ) : null}
-    </Box>
+        ) : (
+          layout.cells.map((cell: PaneCell) => (
+            <StatusGlyph
+              key={`${cell.windowIndex}.${cell.paneIndex}`}
+              status={cell.status}
+              boxColor={boxColor}
+              frame={frame}
+              blinkOn={blinkOn}
+              backgroundColor={bg}
+            />
+          ))
+        )}
+        {layout.tier === "badge" ? (
+          <Text backgroundColor={bg}>{` ×${layout.badge!.total}`}</Text>
+        ) : null}
+        <Text backgroundColor={bg}>{" ".repeat(GLYPH_NAME_GAP)}</Text>
+        <Text bold={focused} backgroundColor={bg}>{pad(record.label, layout.nameW)}</Text>
+        {layout.tier === "full" ? (
+          <>
+            <Text backgroundColor={bg}>{" ".repeat(NAME_PID_GAP)}</Text>
+            <Text dimColor backgroundColor={bg}>{layout.pidText}</Text>
+            <Text backgroundColor={bg}>{" ".repeat(layout.fillerWidth)}</Text>
+            <Text dimColor backgroundColor={bg}>{layout.ctxText}</Text>
+          </>
+        ) : null}
+      </Box>
+      <Box>
+        <Text backgroundColor={bg}>{" "}</Text>
+        <Text dimColor backgroundColor={bg}>{pad(layout.recap, Math.max(0, width - 1))}</Text>
+      </Box>
+    </>
   );
 }
 
@@ -2365,10 +2373,16 @@ function Dashboard() {
   const counts = Object.fromEntries(
     boxIds.map((id) => {
       const rowsInBox = byBox.get(id) ?? [];
+      // A DEEP WORK session draws two lines (its row, then the plan pane's
+      // recap underneath) - see DeepWorkRow's own doc.
+      const rowWeight = rowsInBox.reduce(
+        (sum, r) => sum + (groupOf(r.mode, r.panes.length) === "deep" ? 2 : 1),
+        0,
+      );
       // ceiling: a weight, not a guarantee - `allocate` distributes
       // proportionally, so this makes the box's ask honest rather than making
       // the extra row certain.
-      return [id, rowsInBox.length + boxGroups(records, id).length];
+      return [id, rowWeight + boxGroups(records, id).length];
     }),
   ) as Record<BoxId, number>;
 
