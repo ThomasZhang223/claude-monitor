@@ -153,6 +153,13 @@ export function isMode(v: string): v is Mode {
  *  the first count that no class produces on its own. */
 export const DEEP_WORK_MIN_PANES = 3;
 
+/** Two panels is the shape a `work` session is spawned in, so any session that
+ *  reaches two panes has grown into work — a second pane is only ever opened to
+ *  run a plan or a second track alongside the first. The pane count is what the
+ *  row already shows (two glyphs, two pids, two context readings), so the
+ *  heading follows it rather than the class the session happened to start as. */
+export const WORK_MIN_PANES = 2;
+
 export type DisplayGroup = Mode | "deep";
 
 /** Second, after WORK: a deep-work session is almost always a grown WORK
@@ -162,7 +169,9 @@ export const GROUP_ORDER: readonly DisplayGroup[] = [
 ] as const;
 
 export function groupOf(mode: Mode, paneCount: number): DisplayGroup {
-  return paneCount >= DEEP_WORK_MIN_PANES ? "deep" : mode;
+  if (paneCount >= DEEP_WORK_MIN_PANES) return "deep";
+  if (paneCount >= WORK_MIN_PANES) return "work";
+  return mode;
 }
 
 export function groupLabel(group: DisplayGroup): string {

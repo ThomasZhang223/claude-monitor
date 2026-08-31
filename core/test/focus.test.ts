@@ -86,16 +86,20 @@ test("boxRows: a 3-pane work session moves to DEEP WORK, right after WORK", () =
   assert.deepEqual(boxRows(records, ALPHA.id).map((r) => r.slug), ["small", "big"]);
 });
 
-test("boxRows: a 2-pane quick session stays in QUICK, not DEEP WORK", () => {
-  // Pins the threshold decision: it is panes.length > 2, not "more panes than
-  // this mode's own default" - a 2-pane quick session has grown one pane past
-  // its own default of one, but that alone does not cross into DEEP WORK.
-  const withoutDeep = [record(ALPHA.id, "quick", "q", 2)];
-  assert.deepEqual(boxRows(withoutDeep, ALPHA.id).map((r) => r.slug), ["q"]);
+test("boxRows: a 2-pane quick session moves to WORK, not DEEP WORK", () => {
+  // Pins both thresholds at once: two panes is WORK and three is DEEP WORK, so
+  // a grown quick session lands in the group whose shape it now has rather
+  // than skipping straight past it.
+  const grown = [record(ALPHA.id, "quick", "q", 2), record(ALPHA.id, "quick", "one", 1)];
+  assert.deepEqual(boxRows(grown, ALPHA.id).map((r) => r.slug), ["q", "one"]);
   // Prove it via ordering too: a genuine DEEP WORK session in the same box
-  // sorts before it, since DEEP WORK precedes QUICK in GROUP_ORDER.
-  const withDeep = [record(ALPHA.id, "quick", "q", 2), record(ALPHA.id, "work", "big", 3)];
-  assert.deepEqual(boxRows(withDeep, ALPHA.id).map((r) => r.slug), ["big", "q"]);
+  // sorts after it, since WORK precedes DEEP WORK in GROUP_ORDER.
+  const withDeep = [record(ALPHA.id, "work", "big", 3), record(ALPHA.id, "quick", "q", 2)];
+  assert.deepEqual(boxRows(withDeep, ALPHA.id).map((r) => r.slug), ["q", "big"]);
+});
+
+test("boxGroups: a 2-pane quick session draws the WORK heading, not QUICK", () => {
+  assert.deepEqual(boxGroups([record(ALPHA.id, "quick", "q", 2)], ALPHA.id), ["work"]);
 });
 
 test("boxGroups: only non-empty groups, in GROUP_ORDER", () => {
