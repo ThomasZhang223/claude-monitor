@@ -122,6 +122,23 @@ export interface PushSubscription {
 }
 
 /**
+ * Whether a browser would have let this origin call `pushManager.subscribe`
+ * at all — the platform's own secure-context rule, verified against real
+ * Chrome behavior (headless, both branches) before this PR was opened: HTTPS
+ * always qualifies, and so does plain HTTP on loopback, because a browser
+ * treats `127.0.0.1`/`localhost`/`[::1]` as secure by the same loopback
+ * exception that makes push actually work on board's own default bind
+ * address with no tunnel in front of it. Any other plain-HTTP origin — what
+ * a phone sees through an unencrypted tunnel — is correctly insecure and
+ * rejected here exactly as it would have been unable to subscribe in the
+ * first place.
+ */
+function isSecureOrigin(u: URL): boolean {
+  if (u.protocol === "https:") return true;
+  return u.protocol === "http:" && (u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname === "[::1]");
+}
+
+/**
  * Parse and validate one subscription off the wire.
  *
  * Null for anything malformed, so the route answers 400 rather than storing a
@@ -139,9 +156,8 @@ export function parseSubscription(body: unknown): PushSubscription | null {
   if (typeof endpoint !== "string" || typeof p256dh !== "string" || typeof auth !== "string") return null;
   if (typeof origin !== "string") return null;
 
-  // https only, on both, and parsed rather than pattern-matched: `endpoint`
-  // is about to become a request URL and `origin` about to become a tap
-  // target.
+  // Parsed rather than pattern-matched: `endpoint` is about to become a
+  // request URL and `origin` about to become a tap target.
   let endpointUrl: URL;
   let originUrl: URL;
   try {
@@ -150,7 +166,17 @@ export function parseSubscription(body: unknown): PushSubscription | null {
   } catch {
     return null;
   }
-  if (endpointUrl.protocol !== "https:" || originUrl.protocol !== "https:") return null;
+  // `endpoint` is always a real push service (FCM, Mozilla autopush, ...),
+  // which is always https — no exception needed there. `origin` is the page
+  // a browser decided to let subscribe at all, which happens only in a
+  // secure context — and board's own bind address (Settled item 8:
+  // `127.0.0.1`, no `--host` flag) means the ordinary case, with no tunnel in
+  // front of it yet, is `http://127.0.0.1:<port>`. That origin genuinely
+  // subscribed (a subscription cannot exist otherwise), so requiring literal
+  // `https:` here would reject the one deployment board ships by default —
+  // this must match the browser's own secure-context rule, not a stricter one.
+  if (endpointUrl.protocol !== "https:") return null;
+  if (!isSecureOrigin(originUrl)) return null;
 
   // A P-256 point that is not 65 octets, or an auth secret that is not 16,
   // cannot be from a real subscription and would make the HKDF below derive
