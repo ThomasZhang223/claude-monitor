@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>claude-board</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header>
+  <h1>claude-board</h1>
+  <div class="meta"><span id="counts"></span><span id="clock"></span><button id="new">+ new session</button></div>
+</header>
+<dialog id="newdlg">
+  <form method="dialog">
+    <h2>Start a session in…</h2>
+    <input id="newfilter" type="search" placeholder="filter, or type any absolute path" autocomplete="off">
+    <ul id="newlist"></ul>
+    <menu><button value="cancel">cancel</button></menu>
+  </form>
+</dialog>
+<main id="board"><p class="empty">Loading sessions…</p></main>
+<footer id="err" hidden></footer>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

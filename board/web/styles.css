@@ -1,0 +1,559 @@
+/* The Calder design system, light. Ant Design 5-aligned.
+   Values are final, from the design handoff — the ink scale is one family of
+   alphas over #16273a, so every neutral is the same hue at a different weight
+   rather than a separate grey someone picked.
+
+   This palette is shared by the dashboard and the session page ON PURPOSE. The
+   handoff only specified the session page, but its token block is this one, and
+   two pages of one tool must not disagree about what "needs you" looks like. */
+:root {
+  --bg-layout: #f5f7f9;            /* page ground */
+  --bg: #ffffff;                   /* header, strip, bars, cards */
+
+  --text: rgba(22, 39, 58, 0.88);
+  --text-heading: rgba(22, 39, 58, 0.92);
+  --dim: rgba(22, 39, 58, 0.65);
+  --subtle: rgba(22, 39, 58, 0.45);
+  --faint: rgba(22, 39, 58, 0.25);
+
+  --line: #ebeef2;                 /* splits */
+  --border: #e1e6eb;
+  --fill-quaternary: rgba(22, 39, 58, 0.02);
+  --fill-tertiary: rgba(22, 39, 58, 0.04);
+  --fill-secondary: rgba(22, 39, 58, 0.08);
+
+  --accent: #2568b0;               /* Calder cobalt — primary, and "you" */
+  --accent-bg: #eaf1f9;
+  --accent-border: #b8d1e8;
+  --accent-hover: #3d7cbf;
+
+  --success: #2f8a5c;
+  --success-bg: #e6f3ec;
+  --success-border: #b7dcc6;
+  --success-active: #206c45;
+
+  --warning: #f1b551;
+  --warning-bg: #fbf0dc;
+  --warning-border: #f3d499;
+  --warning-active: #c88512;
+
+  --error: #e0513d;
+  --error-bg: #fbece9;
+  --error-border: #f3c2b9;
+  --error-active: #c94430;
+
+  /* Code blocks are INVERTED panels: dark islands in a light page. Machine
+     output reads as machine output without needing a label to say so. */
+  --code-bg: #16273a;
+  --code-head: #1f2a35;
+  --code-text: #dbe4ee;
+
+  --radius: 6px;
+  --radius-lg: 8px;
+  --radius-card: 10px;
+  --focus-ring: 0 0 0 2px rgba(37, 104, 176, 0.12);
+  --shadow-sm: 0 1px 2px rgba(22, 39, 58, 0.03), 0 1px 6px rgba(22, 39, 58, 0.02);
+
+  /* Named first in case they are installed; the system stacks carry it
+     otherwise. No webfont link: this serves localhost and a tailnet, and a page
+     that waits on fonts.googleapis.com to render text breaks when the network
+     does. */
+  --font-prose: "Inter Tight", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-code: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, Menlo, monospace;
+
+  /* ---- what the DASHBOARD calls things -----------------------------------
+     The handoff did not name these, because it covered one page. They are
+     aliases onto the scale above rather than new colours, so a state cannot
+     mean one thing on a card and another in a session. */
+  --panel: var(--bg);
+  --panel-2: var(--fill-quaternary);
+
+  /* Three states, and the colour says which at a glance across the room:
+       red    — it needs YOU (waiting, blocked on a permission, errored)
+       yellow — Claude is working; leave it alone
+       grey   — idle, in a shell, or ended; nothing is happening */
+  --needs-you: var(--error);
+  --needs-you-urgent: var(--error-active);
+  --working: var(--warning);
+  --idle: var(--subtle);
+  --ended: var(--faint);
+  --tint-needs-you: var(--error-bg);
+  --tint-working: var(--warning-bg);
+
+  /* PR phase colours, defined ONCE. The dashboard card and the session page's
+     strip both key off these, so a PR cannot be green in one place and
+     uncoloured in the other — which it was, because the strip referenced a
+     variable that had since been deleted. Merged is the ACCENT here, not
+     purple: the handoff maps it that way, and this palette has one blue. */
+  --pr-open: var(--success-border);
+  --pr-open-text: var(--success-active);
+  --pr-open-fill: var(--success-bg);
+  --pr-open-dot: var(--success);
+  --pr-draft: var(--border);
+  --pr-draft-text: var(--dim);
+  --pr-draft-fill: var(--fill-quaternary);
+  --pr-draft-dot: #b4bec8;
+  --pr-queued: var(--warning-border);
+  --pr-queued-text: var(--warning-active);
+  --pr-queued-fill: var(--warning-bg);
+  --pr-queued-dot: var(--warning);
+  --pr-merged: var(--accent-border);
+  --pr-merged-text: var(--accent);
+  --pr-merged-fill: var(--accent-bg);
+  --pr-merged-dot: var(--accent);
+  --pr-closed: var(--border);
+  --pr-closed-text: var(--subtle);
+  --pr-closed-fill: var(--fill-quaternary);
+  --pr-closed-dot: #b4bec8;
+
+  /* The number chip on a picker option: a key cap, not a status. */
+  --ask-badge: var(--fill-secondary);
+}
+
+/* The board. Calder design system, light — see the V2 handoff.
+   Shares its palette with the session page: one tool, one set of meanings. */
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg-layout);
+  color: var(--text);
+  font-family: var(--font-prose);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ---- header -------------------------------------------------------------- */
+body > header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 28px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+
+body > header h1 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-heading);
+}
+
+body > header .meta {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-left: auto;
+  font-family: var(--font-code);
+  font-size: 12px;
+  color: var(--subtle);
+}
+
+#new {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-size: 13.5px;
+  font-weight: 500;
+  padding: 6px 16px;
+}
+
+#new:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
+
+/* ---- layout -------------------------------------------------------------- */
+main {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 36px;
+}
+
+section h2 {
+  margin: 0 0 12px;
+  font-family: var(--font-code);
+  font-size: 11px;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--subtle);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 14px;
+}
+
+/* ---- card ---------------------------------------------------------------- */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-top: 3px solid var(--faint);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+/* State lives on the TOP edge, so a wall of cards reads as a row of coloured
+   ticks before you read a single word. */
+.card.busy, .card.working { border-top-color: var(--warning); }
+.card.permission, .card.error { border-top-color: var(--error); }
+.card.awaiting { border-top-color: var(--error); }
+.card.idle, .card.shell { border-top-color: var(--faint); }
+.card.ended { border-top-color: var(--line); opacity: 0.85; }
+
+.card-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.title {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text-heading);
+  min-width: 0;
+}
+
+.shortid {
+  font-family: var(--font-code);
+  font-size: 11px;
+  color: var(--faint);
+}
+
+/* The pill says the same thing here as the session header's does. */
+.status {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: var(--fill-tertiary);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.status::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.7;
+}
+
+.status.busy, .status.working {
+  background: var(--warning-bg); border-color: var(--warning-border); color: var(--warning-active);
+}
+.status.busy::before, .status.working::before { background: var(--warning); opacity: 1; animation: cb-pulse 1.4s ease-in-out infinite; }
+
+.status.permission, .status.error, .status.awaiting {
+  background: var(--error-bg); border-color: var(--error-border); color: var(--error-active);
+}
+.status.permission::before, .status.error::before { background: var(--error); opacity: 1; animation: cb-pulse 1.4s ease-in-out infinite; }
+.status.awaiting::before { background: var(--error); opacity: 1; }
+
+/* An ended session's card says WHEN, not what state it is in — the state is
+   "over", which the whole card already shows. */
+.card.ended .status { display: none; }
+
+.forkof { font-size: 12px; color: var(--subtle); }
+
+.prompt {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--dim);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.prompt.recap { -webkit-line-clamp: 3; }
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-family: var(--font-code);
+  font-size: 11.5px;
+  color: var(--subtle);
+}
+
+/* ---- PR pills ------------------------------------------------------------ */
+.prs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+
+.pr {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-code);
+  font-size: 11.5px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.prdot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
+.prstrip .prdot { width: 6px; height: 6px; }
+.prstrip .pr { font-size: 12px; }
+
+/* Phase owns colour, fill and dot — declared once, in the token block. */
+.ph-open { color: var(--pr-open-text); border-color: var(--pr-open); background: var(--pr-open-fill); }
+.ph-open .prdot { background: var(--pr-open-dot); }
+.ph-draft { color: var(--pr-draft-text); border-color: var(--pr-draft); background: var(--pr-draft-fill); }
+.ph-draft .prdot { background: var(--pr-draft-dot); }
+.ph-queued { color: var(--pr-queued-text); border-color: var(--pr-queued); background: var(--pr-queued-fill); }
+.ph-queued .prdot { background: var(--pr-queued-dot); }
+.ph-merged { color: var(--pr-merged-text); border-color: var(--pr-merged); background: var(--pr-merged-fill); }
+.ph-merged .prdot { background: var(--pr-merged-dot); }
+.ph-closed { color: var(--pr-closed-text); border-color: var(--pr-closed); background: var(--pr-closed-fill); }
+.ph-closed .prdot { background: var(--pr-closed-dot); }
+.ph-unknown { color: var(--subtle); border-color: var(--border); background: var(--fill-quaternary); }
+.ph-unknown .prdot { background: var(--faint); }
+
+.pr:hover { border-color: var(--accent); }
+
+.prs details.done { width: 100%; }
+
+.prs details.done > summary,
+.card details.done > summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: var(--radius);
+  color: var(--subtle);
+}
+
+.prs details.done > summary::-webkit-details-marker { display: none; }
+.prs details.done > summary::before { content: "▸ "; }
+.prs details.done[open] > summary::before { content: "▾ "; }
+.prs details.done > summary:hover { color: var(--text); background: var(--fill-tertiary); }
+.prs details.done > .prs { margin-top: 6px; }
+
+.viewnote {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+}
+
+.viewnote.elsewhere { color: var(--subtle); }
+
+/* ---- controls ------------------------------------------------------------ */
+.actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+button {
+  font-family: var(--font-prose);
+  font-size: 12.5px;
+  padding: 5px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--dim);
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+button:focus-visible { outline: none; border-color: var(--accent); box-shadow: var(--focus-ring); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+button.danger:hover:not(:disabled) {
+  border-color: var(--error-border);
+  background: var(--error-bg);
+  color: var(--error-active);
+}
+
+/* Resume is the one thing an ended card is for. */
+[data-resume] {
+  background: var(--accent-bg);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+[data-resume]:hover:not(:disabled) { background: var(--accent-border); color: var(--accent); }
+
+.steer { display: flex; gap: 6px; }
+
+.steer input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 10px;
+  font-family: var(--font-prose);
+  font-size: 12.5px;
+  color: var(--text);
+  background: var(--fill-quaternary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.steer input::placeholder { color: var(--subtle); }
+
+.steer input:focus-visible {
+  outline: none;
+  background: var(--bg);
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+.steer [data-stop] {
+  background: var(--error-bg);
+  border-color: var(--error-border);
+  color: var(--error-active);
+}
+
+/* ---- the picker ---------------------------------------------------------- */
+.ask {
+  padding: 12px;
+  background: var(--error-bg);
+  border: 1px solid var(--error-border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.askhead { display: flex; align-items: baseline; gap: 8px; }
+
+.askeyebrow {
+  font-family: var(--font-code);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--error-active);
+}
+
+.askq { font-size: 13px; font-weight: 500; color: var(--text-heading); }
+.askopts { display: grid; gap: 6px; }
+
+.askopt {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  text-align: left;
+  font-family: var(--font-prose);
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.askopt:hover, .askopt:focus-visible { border-color: var(--accent); color: var(--accent); outline: none; }
+
+.askopt.off {
+  cursor: default;
+  border-style: dashed;
+  color: var(--subtle);
+  background: transparent;
+}
+
+.askopt.off:hover { border-color: var(--border); color: var(--subtle); }
+
+.asknum {
+  flex: 0 0 auto;
+  min-width: 20px;
+  text-align: center;
+  font-family: var(--font-code);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--dim);
+  background: var(--fill-secondary);
+  border-radius: 3px;
+}
+
+.askopt.off .asknum { background: transparent; border: 1px dashed var(--border); }
+.asktext { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.asklabel { font-size: 13px; }
+.askdesc { font-size: 12px; color: var(--subtle); }
+.askwhy { margin-left: auto; padding-left: 8px; font-size: 11px; color: var(--subtle); white-space: nowrap; }
+
+/* ---- show more, dialog, error bar ---------------------------------------- */
+.more { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+
+.morecount {
+  font-family: var(--font-code);
+  font-size: 11.5px;
+  color: var(--subtle);
+}
+
+.empty { color: var(--subtle); }
+
+dialog {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--bg);
+  color: var(--text);
+  padding: 18px;
+  box-shadow: 0 8px 32px rgba(22, 39, 58, 0.12);
+}
+
+dialog::backdrop { background: rgba(22, 39, 58, 0.25); }
+dialog h2 { margin: 0 0 10px; font-size: 15px; font-weight: 600; color: var(--text-heading); }
+
+#newfilter {
+  width: 100%;
+  padding: 7px 12px;
+  font-family: var(--font-prose);
+  font-size: 13.5px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+#newfilter:focus-visible { outline: none; border-color: var(--accent); box-shadow: var(--focus-ring); }
+
+#newlist { list-style: none; margin: 10px 0 0; padding: 0; max-height: 50vh; overflow-y: auto; }
+#newlist button { display: flex; width: 100%; gap: 10px; align-items: baseline; text-align: left; }
+.rname { font-weight: 600; color: var(--text-heading); }
+.rpath { font-family: var(--font-code); font-size: 11.5px; color: var(--subtle); }
+.rgit { margin-left: auto; font-size: 11px; color: var(--subtle); }
+
+footer {
+  position: sticky;
+  bottom: 0;
+  padding: 10px 28px;
+  background: var(--error-bg);
+  border-top: 1px solid var(--error-border);
+  color: var(--error-active);
+  font-size: 13px;
+}
+
+@keyframes cb-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status::before { animation: none; }
+}
+
+@media (max-width: 560px) {
+  main { padding: 18px 14px; }
+  body > header { padding: 12px 14px; }
+  .grid { grid-template-columns: 1fr; }
+}
