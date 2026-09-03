@@ -1,0 +1,119 @@
+
+ ▐▛███▛█   Claude Code v2.1.246
+▝▜██████▀  Opus 5 (1M context) with medium effort · Claude Team
+  ▝▝ ▝▝    /tmp/claude-1000/-home-di-zeng-repos/7f7a60d7-c206-4b62-8b26-e86a097425c4/scratchpad/compact
+
+
+❯ Say the numbers one through five, one per line.
+
+● 1
+  2
+  3
+  4
+  5
+
+✻ Crunched for 1s · done 11:54 PM
+
+❯ /compact
+  ⎿  Not enough messages to compact.
+
+❯ say A
+
+● A
+
+✻ Churned for 1s · done 12:00 AM
+
+❯ say B
+
+● B
+
+✻ Crunched for 2s · done 12:01 AM
+
+❯ say C
+
+● B... correction: C
+
+✻ Brewed for 1s · done 12:01 AM
+
+❯ say D
+
+● D
+
+✻ Cooked for 2s · done 12:01 AM
+
+❯ say E
+
+● E
+
+✻ Sautéed for 1s · done 12:01 AM
+
+❯ say F
+
+● F
+
+✻ Crunched for 1s · done 12:01 AM
+
+❯ /compact
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+✻ Compacting conversation…
+  ▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 2%
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  [Opus 5 (1M context)] │ compact │ ⏱️   7m
+  Context ░░░░░░░░░░ 4% │ Usage ██████░░░░ 60% (resets in 19m) | Weekly ██░░░░░░░░ 21% (resets in 6d 3h)
+  7 hooks
+  di-zeng-Calder-Desktop
+  ⏵⏵ auto mode on (shift+tab to cycle) · ← 1 agent
