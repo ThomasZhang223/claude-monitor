@@ -38,8 +38,16 @@ const freshName = params.get("fresh");
 const tmuxName = freshName || params.get("tmux") || hashParams.get("s");
 /** A specific pane within it — a push notification or a dashboard card names
  *  one; absent, this defaults to the session's first pane. */
-const paneWindow = Number(params.get("w") ?? hashParams.get("w") ?? 0);
-const panePane = Number(params.get("p") ?? hashParams.get("p") ?? 0);
+/** A malformed `w`/`p` (non-numeric, from a hand-edited URL or a stale
+ *  bookmark) must not become a literal "NaN" in the pane-addressed API path
+ *  below — that fails in a way this page cannot explain. Falls back to the
+ *  session's first pane, same as when the param is absent. */
+function paneIndexParam(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+const paneWindow = paneIndexParam(params.get("w") ?? hashParams.get("w") ?? 0);
+const panePane = paneIndexParam(params.get("p") ?? hashParams.get("p") ?? 0);
 const titleEl = document.getElementById("title");
 const stateEl = document.getElementById("state");
 const prsEl = document.getElementById("prs");
