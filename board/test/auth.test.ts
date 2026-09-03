@@ -39,6 +39,18 @@ test("tokenFromCookie: picks its own cookie out of a crowd", () => {
   assert.equal(tokenFromCookie(undefined), null);
 });
 
+test("tokenFromCookie: malformed percent-encoding is no token, not a throw", () => {
+  // decodeURIComponent throws on this; a corrupted cookie must read as
+  // absent, not crash auth parsing.
+  assert.equal(tokenFromCookie(`${COOKIE}=%zz`), null);
+});
+
+test("tokenFrom: a malformed request URL falls back to the cookie, not a throw", () => {
+  // new URL(url, "http://x") throws on some malformed paths; this must not
+  // crash auth parsing before the cookie is even tried.
+  assert.equal(tokenFrom({ cookie: `${COOKIE}=C` }, "http://bad host/x"), "C");
+});
+
 test("tokenFrom: header beats query beats cookie", () => {
   assert.equal(tokenFrom({ authorization: "Bearer H" }, "/api?t=Q"), "H");
   assert.equal(tokenFrom({ cookie: `${COOKIE}=C` }, "/api?t=Q"), "Q");
