@@ -1,0 +1,762 @@
+/* The session page: a reading surface. claude-monitor's own dark palette —
+   see styles.css's :root block, which this page shares.
+
+   The single highest-impact rule in this file is the 760px measure on the
+   conversation column: prose set the full width of a 1440px window is the
+   thing that made this page hard to read, whatever else was done to it. */
+
+body.session-page {
+  /* 100dvh, not 100vh: iOS Safari's dynamic URL bar changes the viewport
+     height as it hides and shows, and 100vh is measured against the TALLEST
+     state — so the composer sat cropped under the bar's shortest state
+     (Task 3 defect 1). */
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-layout);
+  font-family: var(--font-prose);
+  color: var(--text);
+}
+
+/* ---- header -------------------------------------------------------------- */
+.session-page > header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  /* `viewport-fit=cover` (session.html) puts the page under the notch; env()
+     gives it back (Task 3 defect 3). */
+  padding: calc(10px + env(safe-area-inset-top, 0px)) calc(24px + env(safe-area-inset-right, 0px)) 10px calc(24px + env(safe-area-inset-left, 0px));
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+
+.session-page .back {
+  font-size: 13px;
+  color: var(--dim);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.session-page .back:hover { color: var(--accent); }
+
+.session-page .back::after {
+  content: "";
+  display: inline-block;
+  width: 1px;
+  height: 18px;
+  margin-left: 16px;
+  vertical-align: -4px;
+  background: var(--line);
+}
+
+.session-page h1 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-heading);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-page .meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* The status pill. Same triples as a card's, so a session says the same thing
+   in both places. */
+#state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  background: var(--fill-tertiary);
+  color: var(--dim);
+}
+
+/* Same glyph vocabulary as the dashboard card's `.status` — see styles.css,
+   which this page also loads (session.html links both stylesheets). */
+#state::before { content: ""; font-size: 11px; line-height: 1; }
+#state.working::before { content: "\2736"; }                      /* ✶ */
+#state.awaiting::before { content: "\25C6"; }                      /* ◆ */
+#state.permission::before { content: "\25B2"; }                    /* ▲ */
+#state.idle::before, #state.shell::before { content: "\25C7"; }    /* ◇ */
+#state.error::before, #state.dead::before { content: "\2717"; }    /* ✗ */
+
+#state.busy,
+#state.working {
+  background: var(--fill-tertiary);
+  border-color: var(--box);
+  color: var(--box);
+}
+
+#state.permission,
+#state.error {
+  background: var(--error-bg);
+  border-color: var(--status-permission);
+  color: var(--status-permission);
+}
+
+#state.awaiting {
+  background: rgba(224, 123, 194, 0.14);
+  border-color: var(--status-awaiting);
+  color: var(--status-awaiting);
+}
+
+/* Slow pulse, not the terminal's own blink rate — see styles.css's
+   cb-status-blink for the reduced-motion pairing this must stay next to. */
+#state.awaiting::before,
+#state.permission::before {
+  animation: cb-status-blink 2.2s ease-in-out infinite;
+}
+
+.viewtoggle { flex: 0 0 auto; }
+.viewtoggle[hidden] { display: none; }
+
+/* ---- PR strip ------------------------------------------------------------ */
+.prstrip {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 24px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+
+.prstrip:empty { display: none; }
+
+.prstrip::before {
+  content: "Pull requests";
+  font-family: var(--font-code);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--subtle);
+  margin-right: 4px;
+}
+
+.prstrip .prs { display: contents; }
+
+.prstrip details.done { display: contents; }
+
+.prstrip details.done > summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: var(--radius);
+  color: var(--subtle);
+}
+
+.prstrip details.done > summary::-webkit-details-marker { display: none; }
+.prstrip details.done > summary::before { content: "▸ "; }
+.prstrip details.done[open] > summary::before { content: "▾ "; }
+.prstrip details.done > summary:hover { color: var(--text); background: var(--fill-tertiary); }
+
+/* ---- the conversation ---------------------------------------------------- */
+#chat {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+#chat[hidden] { display: none; }
+
+/* The measure. Everything else in this file is detail next to this. */
+#chat > * {
+  max-width: 760px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.turn {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 0 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.turn + .turn { margin-top: 28px; }
+#chat > .turn:first-of-type { margin-top: 28px; }
+#chat > .turn:last-of-type { margin-bottom: 40px; }
+
+.turn .who {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.turn .speaker {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--subtle);
+}
+
+.turn.mine .speaker { color: var(--accent); }
+
+.turn .when {
+  font-family: var(--font-code);
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.turn .body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* Your own turns are a card. Scanning a long session is almost always looking
+   for what YOU asked, and that is the one thing worth making findable. */
+.turn.mine .body {
+  padding: 12px 16px;
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-card);
+}
+
+.turn.mine .msg {
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text-heading);
+}
+
+.turn.mine code {
+  background: rgba(255, 255, 255, 0.7);
+  border-color: var(--accent-border);
+}
+
+.msg {
+  max-width: none;
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--text);
+}
+
+.msg p { margin: 0 0 10px; }
+.msg p:last-child { margin-bottom: 0; }
+.msg strong { font-weight: 600; color: var(--text-heading); }
+
+.msg code,
+.toolsum,
+.toolname {
+  font-family: var(--font-code);
+}
+
+.msg code {
+  font-size: 13px;
+  padding: 1px 6px;
+  background: var(--fill-tertiary);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.mdh {
+  margin: 6px 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-heading);
+}
+
+.msg a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid var(--accent-border);
+}
+
+.msg a:hover,
+.msg a:focus-visible { border-bottom-color: var(--accent); outline: none; }
+
+/* ---- thinking ------------------------------------------------------------ */
+.msg.thinking {
+  border-left: 2px solid var(--line);
+  padding-left: 12px;
+  font-family: var(--font-prose);
+}
+
+.msg.thinking > summary {
+  cursor: pointer;
+  list-style: none;
+  font-family: var(--font-code);
+  font-size: 12px;
+  color: var(--subtle);
+}
+
+.msg.thinking > summary::-webkit-details-marker { display: none; }
+
+.msg.thinking > summary::before {
+  content: "›";
+  display: inline-block;
+  margin-right: 6px;
+  transition: transform 0.15s;
+}
+
+.msg.thinking[open] > summary::before { transform: rotate(90deg); }
+.msg.thinking p { font-size: 13px; line-height: 1.6; color: var(--subtle); }
+
+/* ---- tools: one folded log per run --------------------------------------- */
+.toolgroup {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  overflow: hidden;
+}
+
+.toolgroup > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--fill-quaternary);
+  font-family: var(--font-code);
+  font-size: 12px;
+  color: var(--dim);
+}
+
+.toolgroup > summary::-webkit-details-marker { display: none; }
+
+.chev::before {
+  content: "›";
+  display: inline-block;
+  transition: transform 0.15s;
+}
+
+details[open] > summary .chev::before { transform: rotate(90deg); }
+
+.toolgroup.hasfailed > summary { color: var(--error-active); }
+
+.toolrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 14px;
+  border-top: 1px solid var(--line);
+  font-family: var(--font-code);
+  font-size: 12.5px;
+}
+
+.toolname {
+  flex: 0 0 56px;
+  color: var(--subtle);
+}
+
+.toolsum {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dim);
+}
+
+.tooldot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #d2d9e1;
+}
+
+.toolrow.failed .tooldot { background: var(--error); }
+.toolrow.failed .toolname { color: var(--error-active); }
+.toolrow.running .tooldot { background: var(--warning); animation: cb-pulse 1.4s ease-in-out infinite; }
+
+/* ---- code: dark islands in a light page ---------------------------------- */
+figure.code {
+  margin: 0;
+  border: 1px solid var(--code-head);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+figure.code figcaption {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 14px;
+  background: var(--code-head);
+  font-family: var(--font-code);
+  font-size: 11px;
+  color: #8a96a4;
+}
+
+figure.code pre {
+  margin: 0;
+  padding: 14px 16px;
+  background: var(--code-bg);
+  color: var(--code-text);
+  font-family: var(--font-code);
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* ---- tables -------------------------------------------------------------- */
+table.md {
+  display: block;
+  width: 100%;
+  border-collapse: collapse;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  overflow-x: auto;
+  font-size: 13.5px;
+}
+
+table.md th {
+  padding: 9px 16px;
+  text-align: left;
+  font-family: var(--font-code);
+  font-size: 11px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--subtle);
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+table.md td {
+  padding: 8px 16px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--line);
+}
+
+table.md tr:last-child td { border-bottom: none; }
+table.md a { color: var(--accent); text-decoration: none; }
+table.md a:hover { text-decoration: underline; }
+
+/* ---- load earlier, working, status bar, composer -------------------------- */
+.earlier {
+  display: flex;
+  justify-content: center;
+  padding: 16px 24px 0;
+}
+
+.earlier[hidden] { display: none; }
+
+.working {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px max(24px, calc((100% - 760px) / 2));
+  font-family: var(--font-code);
+  font-size: 12px;
+  color: var(--warning-active);
+}
+
+.working[hidden] { display: none; }
+
+.working .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warning);
+  animation: cb-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes cb-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .working .dot,
+  .toolrow.running .tooldot,
+  /* #state.awaiting/.permission are more specific than #state alone, so they
+     must be named here too or reduced motion would not win. */
+  #state::before,
+  #state.awaiting::before,
+  #state.permission::before { animation: none; }
+}
+
+.statusbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  /* env() for a notched screen in landscape (Task 3 defect 3). */
+  padding: 7px calc(24px + env(safe-area-inset-right, 0px)) 7px calc(24px + env(safe-area-inset-left, 0px));
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+  font-family: var(--font-code);
+  font-size: 11.5px;
+  color: var(--subtle);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.statusbar:empty { display: none; }
+
+.stat { display: inline-flex; align-items: center; gap: 6px; }
+.statlabel { text-transform: uppercase; letter-spacing: 0.08em; }
+.statpct { font-variant-numeric: tabular-nums; color: var(--dim); }
+.statreset { color: var(--faint); }
+.stat.muted { color: var(--faint); }
+
+.meter {
+  display: inline-block;
+  width: 52px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--fill-secondary);
+  overflow: hidden;
+}
+
+.meter > span { display: block; height: 100%; background: #8a96a4; }
+.meter.warm > span { background: var(--warning); }
+.meter.hot > span { background: var(--error); }
+
+.modeswitch {
+  margin-left: auto;
+  flex: 0 0 auto;
+  font-family: var(--font-code);
+  font-size: 11.5px;
+  padding: 2px 10px;
+  border-radius: 999px;
+}
+
+/* Full-width white bar whose CONTENTS sit in the same 760px column as the
+   conversation. Constraining the form itself left a white island in a grey
+   bar; the padding does the centring instead. */
+.composer {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  /* calc(...) rather than max(): the bottom side must ADD the safe area on
+     top of the existing 14px, not replace it with whichever is larger — the
+     home indicator sits below the text, not instead of the padding around it
+     (Task 3 defect 3). */
+  padding: 12px max(24px, calc((100% - 760px) / 2)) calc(14px + env(safe-area-inset-bottom, 0px));
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+}
+
+.composer[hidden] { display: none; }
+
+.composer textarea {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-height: 9rem;
+  padding: 9px 14px;
+  font-family: var(--font-prose);
+  /* 16px: below this, iOS Safari zooms the page on focus (Task 3 defect 2). */
+  font-size: 16px;
+  line-height: 1.5;
+  resize: vertical;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.composer textarea:focus-visible {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+.composer textarea:disabled { color: var(--subtle); background: var(--fill-quaternary); cursor: not-allowed; }
+
+#send {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 8px 18px;
+}
+
+#send:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
+
+#stop {
+  background: var(--error-bg);
+  border-color: var(--error-border);
+  color: var(--error-active);
+}
+
+#stop:hover:not(:disabled) { background: var(--error); border-color: var(--error); color: #fff; }
+#stop[hidden] { display: none; }
+
+/* The terminal stays dark, because terminals are. */
+#termwrap { flex: 1 1 auto; min-height: 0; position: relative; display: flex; }
+#termwrap[hidden] { display: none; }
+#term { flex: 1 1 auto; min-height: 0; padding: 8px 12px; background: var(--code-bg); }
+#term .xterm { height: 100%; }
+
+/* Touch scroll: tmux owns the pane, so a drag has nothing of its own to
+   scroll — the only path is the {type:"scroll"} control frame session.js
+   already sends for the mouse wheel. These two buttons drive that same frame
+   (Task 3 defect 5). 44px each, thumb-reachable over the bottom corner. */
+.termscroll {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 2;
+}
+
+.termscroll button {
+  width: 44px;
+  padding: 0;
+  background: rgba(11, 14, 19, 0.85);
+  border-color: var(--border);
+  color: var(--text);
+  font-size: 16px;
+}
+
+footer#bar {
+  flex: 0 0 auto;
+  /* env() for the home indicator — this is the true bottom edge whenever the
+     composer is hidden (the terminal view; Task 3 defect 3). */
+  padding: 6px calc(24px + env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) calc(24px + env(safe-area-inset-left, 0px));
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+  font-family: var(--font-code);
+  font-size: 11.5px;
+  color: var(--subtle);
+}
+
+footer#bar.bad { background: var(--error-bg); border-top-color: var(--error-border); color: var(--error-active); }
+
+/* The ask panel keeps the card's shape; colours come from the shared tokens. */
+#ask { flex: 0 0 auto; }
+#ask .ask { max-width: 760px; margin: 12px auto 0; }
+
+@media (max-width: 640px) {
+  .session-page > header { padding: 10px 14px; gap: 10px; }
+  .prstrip { padding: 8px 14px; }
+  .turn { padding: 0 14px; }
+  .composer, .working, .statusbar { padding-left: 14px; padding-right: 14px; }
+}
+
+/* ---- harness notes ------------------------------------------------------
+   Background-task events and slash-command plumbing arrive as "user" turns.
+   They carry real information — "MERGED: myrepo#633" comes through this
+   way — but they are events, not conversation, so they read as marginalia:
+   one line, mono, dim, no speaker. Rendered raw they were angle brackets and
+   tool ids in the middle of a paragraph. */
+.notes {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 0 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.turn + .notes,
+.notes + .turn { margin-top: 20px; }
+
+.note {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 10px;
+  background: var(--fill-quaternary);
+  border-left: 2px solid var(--line);
+  border-radius: 0 4px 4px 0;
+  font-family: var(--font-code);
+  font-size: 11.5px;
+  color: var(--subtle);
+}
+
+/* Both halves must be able to SHRINK. `flex: 0 0 auto` on the label was fine
+   for "CI verdict" and wrong for a stopped background shell, whose summary is a
+   whole paragraph: the label could not shrink, so the row grew instead and ran
+   off the side of the page. */
+.notelabel {
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notedetail {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note .when { flex: 0 0 auto; }
+
+@media (max-width: 640px) {
+  .notes { padding: 0 14px; }
+}
+
+/* Failed calls surface outside the fold. A run of sixty with one bad call used
+   to open all sixty; this shows the one that matters and leaves the rest one
+   click away. */
+.toolrows.surfaced {
+  border: 1px solid var(--error-border);
+  border-radius: var(--radius-lg);
+  background: var(--error-bg);
+  overflow: hidden;
+}
+
+.toolrows.surfaced .toolrow { border-top: none; }
+.toolrows.surfaced .toolrow + .toolrow { border-top: 1px solid var(--error-border); }
+.toolrows.lone { border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; }
+.toolrows.lone .toolrow { border-top: none; }
+
+/* A message handed to the terminal but not yet seen in the transcript. Claude
+   Code takes about two seconds to write the row; without this your own message
+   appears to vanish for that long. */
+.msg.sending { opacity: 0.6; }
+
+.msg.unconfirmed {
+  opacity: 1;
+  border-left: 2px solid var(--warning);
+  padding-left: 10px;
+}
+
+.sendnote {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--font-code);
+  font-size: 11px;
+  color: var(--warning-active);
+}
+
+/* A session with no transcript yet. Blank with no explanation reads as broken. */
+#chatempty {
+  max-width: 760px;
+  margin: 28px auto;
+  padding: 0 24px;
+  color: var(--subtle);
+  font-size: 14px;
+}
+
+#chatempty[hidden] { display: none; }

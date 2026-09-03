@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>session · board</title>
+<link rel="stylesheet" href="/vendor/xterm-css/xterm.css">
+<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/session.css">
+<link rel="manifest" href="/manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+</head>
+<body class="session-page">
+<header>
+  <a class="back" href="/">‹ board</a>
+  <h1 id="title">session</h1>
+  <div class="meta">
+    <span id="state" class="status"></span>
+    <button id="toggle" class="viewtoggle" title="The terminal is the escape hatch: slash-commands, plan approval, and anything the chat cannot drive.">terminal</button>
+  </div>
+</header>
+<div id="prs" class="prstrip"></div>
+<div id="ask"></div>
+<div id="chat" class="chat">
+  <div id="earlierwrap" class="earlier" hidden><button id="earlier" type="button">load earlier</button></div>
+  <p id="chatempty" class="empty" hidden>Nothing in this conversation yet — say something below to start it.</p>
+</div>
+<div id="termwrap" hidden>
+  <div id="term"></div>
+  <div class="termscroll">
+    <button id="scrollup" type="button" aria-label="Scroll the terminal up">&#9650;</button>
+    <button id="scrolldown" type="button" aria-label="Scroll the terminal down">&#9660;</button>
+  </div>
+</div>
+<div id="status" class="statusbar"></div>
+<div id="working" class="working" hidden><span class="dot"></span><span id="workinglabel">Claude is working…</span></div>
+<form id="composer" class="composer">
+  <textarea id="say" rows="1" placeholder="say something…" aria-label="Message this session"></textarea>
+  <button id="send" type="submit">Send</button>
+  <button id="stop" type="button" class="danger" hidden title="Press Escape in this session, ending the turn it is running.">Stop</button>
+</form>
+<footer id="bar"></footer>
+<script type="module" src="/session.js"></script>
+</body>
+</html>
