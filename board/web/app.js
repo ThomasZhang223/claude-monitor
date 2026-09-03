@@ -392,6 +392,7 @@ list.addEventListener("click", async (ev) => {
 const PUSH_INSECURE_CONTEXT_MESSAGE = "Push needs HTTPS — put a tunnel in front of board.";
 
 const pushBtn = document.getElementById("push");
+const pushReasonEl = document.getElementById("pushreason");
 
 /** base64url -> the Uint8Array pushManager.subscribe() wants for
  *  applicationServerKey. */
@@ -437,10 +438,14 @@ function setUpPushControl() {
   pushBtn.hidden = false;
   if (!supported) {
     pushBtn.disabled = true;
-    pushBtn.title = PUSH_INSECURE_CONTEXT_MESSAGE;
+    // Visible text, not just a `title` tooltip: a tooltip needs a hover a
+    // touch screen has no equivalent for, which is the one platform this
+    // hand-off exists for. Di's own undrivable-option pattern (askPanel's
+    // `askwhy`) shows a reason the same way — as text, not as a title.
+    pushReasonEl.textContent = PUSH_INSECURE_CONTEXT_MESSAGE;
+    pushReasonEl.hidden = false;
     return;
   }
-  pushBtn.title = "";
   pushBtn.addEventListener("click", enablePush, { once: true });
 }
 

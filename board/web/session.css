@@ -652,10 +652,15 @@ footer#bar.bad { background: var(--error-bg); border-top-color: var(--error-bord
 #ask .ask { max-width: 760px; margin: 12px auto 0; }
 
 @media (max-width: 640px) {
-  .session-page > header { padding: 10px 14px; gap: 10px; }
+  /* Keep the env() insets the base rules added (Task 3 defect 3) — a flat
+     14px here would drop them back under the notch/home indicator on
+     exactly the screens this media query targets. */
+  .session-page > header { padding: calc(10px + env(safe-area-inset-top, 0px)) calc(14px + env(safe-area-inset-right, 0px)) 10px calc(14px + env(safe-area-inset-left, 0px)); gap: 10px; }
   .prstrip { padding: 8px 14px; }
   .turn { padding: 0 14px; }
-  .composer, .working, .statusbar { padding-left: 14px; padding-right: 14px; }
+  .composer { padding-left: calc(14px + env(safe-area-inset-left, 0px)); padding-right: calc(14px + env(safe-area-inset-right, 0px)); }
+  .working { padding-left: 14px; padding-right: 14px; }
+  .statusbar { padding-left: calc(14px + env(safe-area-inset-left, 0px)); padding-right: calc(14px + env(safe-area-inset-right, 0px)); }
 }
 
 /* ---- harness notes ------------------------------------------------------
