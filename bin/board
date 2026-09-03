@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Launch the board: a phone-and-desktop web companion for the session dashboard.
+#
+# Usage:  board
+set -euo pipefail
+
+# Resolve through symlinks — this script is symlinked into ~/.local/bin, and the
+# app it launches lives next to the real file, not next to the link.
+src="${BASH_SOURCE[0]}"
+while [ -L "$src" ]; do
+	dir=$(cd -P "$(dirname "$src")" && pwd)
+	src=$(readlink "$src")
+	[[ "$src" != /* ]] && src="$dir/$src"
+done
+root=$(cd -P "$(dirname "$src")/.." && pwd)
+
+cd "$root/board"
+
+# Install when missing, or refresh when node_modules has drifted from the
+# committed lockfile. node_modules/.package-lock.json is npm's post-install
+# marker.
+if [ ! -d node_modules ] ||
+	[ ! -f node_modules/.package-lock.json ] ||
+	[ package-lock.json -nt node_modules/.package-lock.json ]; then
+	echo "Installing board dependencies..."
+	npm ci --silent
+fi
+
+exec npx tsx src/main.ts "$@"
