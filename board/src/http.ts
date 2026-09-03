@@ -197,7 +197,14 @@ function json(res: http.ServerResponse, code: number, body: unknown): undefined 
  * `path.join` alone would happily walk out of the web root.
  */
 export function safeResolve(root: string, urlPath: string): string | null {
-  const rel = decodeURIComponent(urlPath.replace(/^\/+/, ""));
+  let rel: string;
+  try {
+    // Malformed percent-encoding (e.g. `/%%%`) must fail closed like any
+    // other invalid path, not escape as an uncaught exception.
+    rel = decodeURIComponent(urlPath.replace(/^\/+/, ""));
+  } catch {
+    return null;
+  }
   const abs = path.resolve(root, rel);
   const prefix = root.endsWith(path.sep) ? root : root + path.sep;
   return abs === root || abs.startsWith(prefix) ? abs : null;
@@ -303,7 +310,17 @@ export function createServer(opts: ServerOptions): http.Server {
   const tmux: TmuxOps = opts.tmux ?? { run: runTmux, has: (name) => hasSession(name) };
 
   return http.createServer(async (req, res) => {
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+    let url: URL;
+    try {
+      // A malformed request line or Host header must not crash the process —
+      // an async request handler that throws synchronously becomes an
+      // unhandled rejection, which can take the whole server down over one
+      // bad request.
+      url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+    } catch {
+      json(res, 400, { error: "bad request" });
+      return;
+    }
     const headers = req.headers as Record<string, string | string[] | undefined>;
 
     // The mandatory control. Everything below this point — including static

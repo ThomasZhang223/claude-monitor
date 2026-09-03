@@ -295,11 +295,15 @@ async function inMergeQueue(repo: string, number: number): Promise<boolean> {
   const [owner, name] = repo.split("/");
   if (!owner || !name) return false;
   try {
+    // JSON.stringify, not raw interpolation: GraphQL string literals follow
+    // the same escaping rules as JSON, so this is what keeps an owner or
+    // repo name containing a quote or backslash from breaking the query
+    // rather than merely being looked up.
     const { stdout } = await execFileAsync(
       "gh",
       [
         "api", "graphql",
-        "-f", `query=query { repository(owner: "${owner}", name: "${name}") { pullRequest(number: ${number}) { isInMergeQueue } } }`,
+        "-f", `query=query { repository(owner: ${JSON.stringify(owner)}, name: ${JSON.stringify(name)}) { pullRequest(number: ${number}) { isInMergeQueue } } }`,
         "--jq", ".data.repository.pullRequest.isInMergeQueue",
       ],
       { timeout: 10_000 },

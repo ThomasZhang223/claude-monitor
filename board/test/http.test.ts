@@ -8,6 +8,7 @@
  */
 import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
+import * as net from "net";
 import type { AddressInfo } from "net";
 import * as fs from "fs";
 import * as os from "os";
@@ -378,4 +379,34 @@ test("api: detach on a session with no view is not an error", async (t) => {
   const h = await serve(t, { tmux: { has: async () => true, run: async () => ({ ok: false, stdout: "", stderr: "no such session" }) } });
   const res = await h.go("/api/sessions/happy/detach", { method: "POST" });
   assert.equal(res.status, 200, "a view that already went away satisfies the goal");
+});
+
+// --- failing closed on malformed input, rather than throwing -------------
+
+test("safeResolve: malformed percent-encoding is an invalid path, not a throw", () => {
+  // decodeURIComponent throws on this; safeResolve must fail closed like any
+  // other invalid path, since its caller relies on null meaning "refuse".
+  assert.equal(safeResolve("/srv/web", "/%%%"), null);
+  assert.equal(safeResolve("/srv/web", "/%zz"), null);
+});
+
+test("api: a malformed request line does not crash the server", async (t) => {
+  const h = await serve(t);
+  const port = Number(new URL(h.base).port);
+  // A Host header containing a space makes `new URL(req.url, base)` throw —
+  // Node's own HTTP parser does not reject this before it reaches the
+  // handler, and an async handler that throws synchronously becomes an
+  // unhandled rejection capable of taking the whole server down.
+  const raw = await new Promise<string>((resolve, reject) => {
+    const sock = net.connect(port, "127.0.0.1", () => {
+      sock.write(`GET / HTTP/1.1\r\nHost: bad host\r\nConnection: close\r\n\r\n`);
+    });
+    let data = "";
+    sock.on("data", (d) => { data += d; });
+    sock.on("close", () => resolve(data));
+    sock.on("error", reject);
+  });
+  assert.match(raw, /^HTTP\/1\.1 400/, "a clean 400, not a reset connection");
+  // The server itself is still alive and answering ordinary requests.
+  assert.equal((await h.go("/api/sessions")).status, 200);
 });

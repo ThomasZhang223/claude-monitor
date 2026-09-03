@@ -106,7 +106,15 @@ export function tokenFromCookie(header: string | undefined): string | null {
   if (!header) return null;
   for (const part of header.split(";")) {
     const [k, ...rest] = part.trim().split("=");
-    if (k === COOKIE) return decodeURIComponent(rest.join("="));
+    if (k !== COOKIE) continue;
+    try {
+      // Malformed percent-encoding (a corrupted or hand-edited cookie) must
+      // not crash auth parsing — it just means this cookie carries no
+      // usable token, the same as if it were absent.
+      return decodeURIComponent(rest.join("="));
+    } catch {
+      return null;
+    }
   }
   return null;
 }
@@ -115,8 +123,14 @@ export function tokenFromCookie(header: string | undefined): string | null {
 export function tokenFrom(headers: Record<string, string | string[] | undefined>, url: string): string | null {
   const auth = headers.authorization;
   if (typeof auth === "string" && auth.startsWith("Bearer ")) return auth.slice(7);
-  const query = new URL(url, "http://x").searchParams.get("t");
-  if (query) return query;
+  try {
+    // A malformed request URL must not crash auth parsing — fall back to
+    // the header/cookie below instead of throwing.
+    const query = new URL(url, "http://x").searchParams.get("t");
+    if (query) return query;
+  } catch {
+    /* fall through to the cookie */
+  }
   const cookie = headers.cookie;
   return tokenFromCookie(typeof cookie === "string" ? cookie : undefined);
 }
