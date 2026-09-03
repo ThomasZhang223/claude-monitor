@@ -1,0 +1,40 @@
+
+ ▐▛███▛█   Claude Code v2.1.246
+▝▜██████▀  Opus 5 (1M context) with medium effort · Claude Team
+  ▝▝ ▝▝    /tmp/claude-1000/-home-di-zeng-repos/7f7a60d7-c206-4b62-8b26-e86a097425c4/scratchpad/modes
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  [Opus 5 (1M context)] │ modes
+  Context ░░░░░░░░░░ 0% │ Usage █░░░░░░░░░ 10% (resets in 3h 5m) | Weekly ██░░░░░░░░ 16% (resets in 6d 6h)
+  7 hooks
+  di-zeng-Calder-Desktop
+  ⏵⏵ accept edits on (shift+tab to cycle) · ← 1 agent
