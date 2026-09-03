@@ -166,7 +166,7 @@ function toolItem(t) {
 function item(it) {
   if (it.kind === "tool") return toolItem(it);
   if (it.kind === "note") {
-    // One quiet line. These carry real information — "MERGED: calder_tasks#633"
+    // One quiet line. These carry real information — "MERGED: myrepo#633"
     // arrives this way — but they are events, not conversation, so they read as
     // marginalia rather than as somebody speaking.
     return `<div class="note" title="${esc(it.full ?? it.label)}">

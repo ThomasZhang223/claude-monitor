@@ -3,10 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>session · claude-board</title>
+<title>session · board</title>
 <link rel="stylesheet" href="/vendor/xterm-css/xterm.css">
 <link rel="stylesheet" href="/styles.css">
 <link rel="stylesheet" href="/session.css">
+<link rel="manifest" href="/manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 </head>
 <body class="session-page">
 <header>
@@ -23,7 +26,13 @@
   <div id="earlierwrap" class="earlier" hidden><button id="earlier" type="button">load earlier</button></div>
   <p id="chatempty" class="empty" hidden>Nothing in this conversation yet — say something below to start it.</p>
 </div>
-<div id="term" hidden></div>
+<div id="termwrap" hidden>
+  <div id="term"></div>
+  <div class="termscroll">
+    <button id="scrollup" type="button" aria-label="Scroll the terminal up">&#9650;</button>
+    <button id="scrolldown" type="button" aria-label="Scroll the terminal down">&#9660;</button>
+  </div>
+</div>
 <div id="status" class="statusbar"></div>
 <div id="working" class="working" hidden><span class="dot"></span><span id="workinglabel">Claude is working…</span></div>
 <form id="composer" class="composer">

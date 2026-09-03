@@ -3,13 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>claude-board</title>
+<title>board</title>
 <link rel="stylesheet" href="/styles.css">
+<link rel="manifest" href="/manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 </head>
 <body>
 <header>
-  <h1>claude-board</h1>
-  <div class="meta"><span id="counts"></span><span id="clock"></span><button id="new">+ new session</button></div>
+  <h1>board</h1>
+  <div class="meta">
+    <span id="counts"></span>
+    <span id="clock"></span>
+    <button id="push" class="pushctl" hidden>Enable notifications</button>
+    <button id="new">+ new session</button>
+  </div>
 </header>
 <dialog id="newdlg">
   <form method="dialog">
@@ -17,6 +25,16 @@
     <input id="newfilter" type="search" placeholder="filter, or type any absolute path" autocomplete="off">
     <ul id="newlist"></ul>
     <menu><button value="cancel">cancel</button></menu>
+  </form>
+</dialog>
+<dialog id="confirmdlg">
+  <form method="dialog">
+    <h2 id="confirmtitle">Are you sure?</h2>
+    <p id="confirmbody"></p>
+    <menu>
+      <button value="cancel">Cancel</button>
+      <button id="confirmok" value="ok" class="danger">Confirm</button>
+    </menu>
   </form>
 </dialog>
 <main id="board"><p class="empty">Loading sessions…</p></main>

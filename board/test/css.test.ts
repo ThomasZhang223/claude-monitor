@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
+import { PALETTE, hueDegrees } from "../../core/src/palette.ts";
 
 const WEB = path.resolve(fileURLToPath(import.meta.url), "../../web");
 const sheets = fs.readdirSync(WEB).filter((f) => f.endsWith(".css"));
@@ -111,6 +112,69 @@ test("css: the picker reuses the board's error colour, not a second red", () => 
   assert.match(rules, /border:\s*1px solid var\(--error-border\)/);
   const literals = rules.match(/#[0-9a-fA-F]{3,8}/g) ?? [];
   assert.deepEqual(literals, [], `picker rules should use tokens, found ${literals.join(", ")}`);
+});
+
+// --- the re-theme: STATUS_STYLES tokens, and the reserved-hue guarantee ----
+//
+// core/src/model.ts:266's STATUS_STYLES is the vocabulary the web UI's status
+// pill, glyph and card border are drawn from; core/src/palette.ts's PALETTE is
+// where a box's own colour comes from. The two must never collide — a box
+// border sharing a status colour would hide the thing a status mark exists to
+// draw the eye to (palette.ts's own module comment).
+
+test("css: every status token resolves through its var() alias chain to a real colour", () => {
+  for (const name of ["--status-awaiting", "--status-permission", "--status-error", "--status-idle"]) {
+    assert.equal(colour(name).length, 3, name);
+  }
+});
+
+test("css: --code-bg carries over from claude-board's original, unchanged", () => {
+  // The plan is explicit that this one value is kept literal, not re-derived
+  // from the monitor's own palette.
+  assert.deepEqual(colour("--code-bg"), [0x16, 0x27, 0x3a]);
+});
+
+/** Circular hue distance in degrees, [0, 180]. */
+function hueDistance(a: number, b: number): number {
+  const d = Math.abs(a - b) % 360;
+  return d > 180 ? 360 - d : d;
+}
+
+/** [r, g, b] -> the same hue space hueDegrees() computes PALETTE's hues in,
+ *  so a resolved CSS colour and a PALETTE entry can be compared on one scale. */
+function rgbHue([r, g, b]: [number, number, number]): number {
+  const max = Math.max(r, g, b) / 255;
+  const min = Math.min(r, g, b) / 255;
+  const d = max - min;
+  if (d === 0) return 0;
+  const rn = r / 255, gn = g / 255, bn = b / 255;
+  let h: number;
+  if (max === rn) h = ((gn - bn) / d) % 6;
+  else if (max === gn) h = (bn - rn) / d + 2;
+  else h = (rn - gn) / d + 4;
+  h *= 60;
+  return h < 0 ? h + 360 : h;
+}
+
+test("css: no box palette colour lands near a status hue", () => {
+  // Not a re-test of palette.ts's own red/magenta-band guarantee (that is
+  // palette.test.ts's job) — this checks THIS stylesheet's actual chosen
+  // status hexes against every box colour the setup panel can hand out, so a
+  // future recolour of either side cannot quietly reintroduce the collision.
+  const awaitingHue = rgbHue(colour("--status-awaiting"));
+  const permissionHue = rgbHue(colour("--status-permission"));
+  const MIN_DISTANCE = 25;
+  for (const { name, hex } of PALETTE) {
+    const boxHue = hueDegrees(hex);
+    assert.ok(
+      hueDistance(boxHue, awaitingHue) > MIN_DISTANCE,
+      `box colour "${name}" (${hex}, hue ${boxHue.toFixed(0)}) sits within ${MIN_DISTANCE} degrees of --status-awaiting (hue ${awaitingHue.toFixed(0)})`,
+    );
+    assert.ok(
+      hueDistance(boxHue, permissionHue) > MIN_DISTANCE,
+      `box colour "${name}" (${hex}, hue ${boxHue.toFixed(0)}) sits within ${MIN_DISTANCE} degrees of --status-permission (hue ${permissionHue.toFixed(0)})`,
+    );
+  }
 });
 
 test("css: the PR strip has no renderer or scheme of its own", () => {

@@ -11,17 +11,17 @@ import assert from "node:assert/strict";
 // immediately above the specifier line, which is why this import stays on one
 // line however long it gets.
 // @ts-expect-error - untyped browser module
-import { STATUS_LABEL, ago, askPanel, attachNote, card, describe, esc, moreButton, prBlock, repoShort, section, splitPrs, steer } from "../web/render.js";
+import { STATUS_LABEL, ago, askPanel, attachNote, card, describe, esc, moreButton, paneRow, paneRows, prBlock, repoShort, section, splitPrs, steer, unboxedCard, unboxedSection } from "../web/render.js";
 
 const pr = (o: Record<string, unknown> = {}) => ({
-  repository: "Calder-AI/calder_core", number: 7, url: "https://x/7", at: 1,
+  repository: "example-org/example-repo", number: 7, url: "https://x/7", at: 1,
   title: "A PR", phase: "open", checks: null, ...o,
 });
 const s = (o: Record<string, unknown> = {}) => ({
   sessionId: "abc", title: "T", recap: null, lastPrompt: null, status: "idle",
-  live: true, repo: "Calder-AI/calder_core", model: null, contextPct: null,
+  live: true, repo: "example-org/example-repo", model: null, contextPct: null,
   costUsd: null, startedAt: null, updatedAt: null, prs: [], attach: "tmux",
-  viewOpen: false, attached: false, ...o,
+  viewOpen: false, attached: false, panes: [], boxColor: null, ...o,
 });
 
 // --- escaping ---------------------------------------------------------------
@@ -153,14 +153,14 @@ test("ago: reads in the largest unit that still says something", () => {
 });
 
 test("repoShort: drops the owner, which is the same for everything here", () => {
-  assert.equal(repoShort("Calder-AI/calder_core"), "calder_core");
+  assert.equal(repoShort("example-org/example-repo"), "example-repo");
   assert.equal(repoShort(null), "—");
 });
 
 test("card: names its repo, since the board no longer groups by it", () => {
   // Sections are "in progress" and "recently ended" now, so the repo has to be
   // legible on the card itself.
-  assert.ok(card(s({ repo: "Calder-AI/calder_core" })).includes("calder_core"));
+  assert.ok(card(s({ repo: "example-org/example-repo" })).includes("example-repo"));
   assert.ok(card(s({ repo: null })).includes("—"), "and says so when there is none");
 });
 
@@ -290,4 +290,83 @@ test("steer: a hostile session id cannot inject markup", () => {
 
 test("card: a live tmux session carries the steer control", () => {
   assert.ok(card(s({ attach: "tmux", status: "busy" })).includes("data-say"));
+});
+
+// --- the re-theme: box colour and per-pane rows ------------------------------
+//
+// core/src/palette.ts's box colours are user configuration, so a card takes
+// its box tint as an inline custom property rather than a class — see the
+// plan's "Theme" section.
+
+test("card: a box colour rides as an inline --box custom property", () => {
+  const html = card(s({ boxColor: "#4A90D9" }));
+  assert.ok(html.includes('style="--box:#4A90D9"'), html.slice(0, 120));
+});
+
+test("card: no box colour means no inline style, not a blank one", () => {
+  assert.ok(!card(s({ boxColor: null })).includes("--box"));
+});
+
+test("card: a hostile box colour cannot break out of the style attribute", () => {
+  assert.ok(!card(s({ boxColor: '"><img src=x onerror=alert(1)>' })).includes("<img"));
+});
+
+test("paneRows: fewer than two panes renders nothing — the card header already says the status", () => {
+  assert.equal(paneRows([]), "");
+  assert.equal(paneRows([{ windowIndex: 0, paneIndex: 0, status: "working", contextPct: 40 }]), "");
+});
+
+test("paneRows: a DEEP WORK session shows one row per pane", () => {
+  const html = paneRows([
+    { windowIndex: 0, paneIndex: 0, status: "working", contextPct: 40 },
+    { windowIndex: 1, paneIndex: 0, status: "awaiting", contextPct: null },
+  ]);
+  assert.ok(html.includes("pane 0.0"));
+  assert.ok(html.includes("pane 1.0"));
+  assert.ok(html.includes("ctx 40%"));
+  assert.ok(html.includes('class="status working"'));
+  assert.ok(html.includes('class="status awaiting"'));
+});
+
+test("paneRow: reuses the .status pill rather than a second status vocabulary", () => {
+  assert.ok(paneRow({ windowIndex: 0, paneIndex: 0, status: "permission", contextPct: null }).includes('class="status permission"'));
+});
+
+test("card: a multi-pane session's rows appear alongside its own card header", () => {
+  const html = card(s({
+    status: "permission",
+    panes: [
+      { windowIndex: 0, paneIndex: 0, status: "working", contextPct: 20 },
+      { windowIndex: 1, paneIndex: 0, status: "permission", contextPct: null },
+    ],
+  }));
+  assert.ok(html.includes('class="card permission"'));
+  assert.ok(html.includes("panerow"));
+});
+
+// --- the re-theme: sessions collectSessions() cannot see ---------------------
+
+test("unboxedCard: a hand-started session with no name falls back to its cwd", () => {
+  const html = unboxedCard({ pid: 42, sessionId: "sid", cwd: "/repo/example", name: null, rawStatus: "idle", live: true });
+  assert.ok(html.includes("example"));
+});
+
+test("unboxedCard: dead once snapshotPs no longer sees its pid", () => {
+  const html = unboxedCard({ pid: 42, sessionId: "sid", cwd: "/repo", name: "x", rawStatus: "busy", live: false });
+  assert.ok(html.includes('class="card dead"'));
+});
+
+test("unboxedCard: carries no action — core exposes no tmux target for it yet", () => {
+  const html = unboxedCard({ pid: 42, sessionId: "sid", cwd: "/repo", name: "x", rawStatus: "idle", live: true });
+  assert.ok(!html.includes("data-open"));
+  assert.ok(!html.includes("data-say"));
+});
+
+test("unboxedCard: a hostile name cannot inject markup", () => {
+  const html = unboxedCard({ pid: 1, sessionId: "s", cwd: "/r", name: "</span><img src=x onerror=alert(1)>", rawStatus: "idle", live: true });
+  assert.ok(!html.includes("<img"));
+});
+
+test("unboxedSection: empty renders nothing, same as section()", () => {
+  assert.equal(unboxedSection("outside a box", []), "");
 });

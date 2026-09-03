@@ -1,13 +1,16 @@
-/* The session page: a reading surface.
-   Calder design system, light — see the handoff in
-   "Claude dashboard UI improvements V2". Values here are the specified ones.
+/* The session page: a reading surface. claude-monitor's own dark palette —
+   see styles.css's :root block, which this page shares.
 
    The single highest-impact rule in this file is the 760px measure on the
    conversation column: prose set the full width of a 1440px window is the
    thing that made this page hard to read, whatever else was done to it. */
 
 body.session-page {
-  height: 100vh;
+  /* 100dvh, not 100vh: iOS Safari's dynamic URL bar changes the viewport
+     height as it hides and shows, and 100vh is measured against the TALLEST
+     state — so the composer sat cropped under the bar's shortest state
+     (Task 3 defect 1). */
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -22,7 +25,9 @@ body.session-page {
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 10px 24px;
+  /* `viewport-fit=cover` (session.html) puts the page under the notch; env()
+     gives it back (Task 3 defect 3). */
+  padding: calc(10px + env(safe-area-inset-top, 0px)) calc(24px + env(safe-area-inset-right, 0px)) 10px calc(24px + env(safe-area-inset-left, 0px));
   background: var(--bg);
   border-bottom: 1px solid var(--line);
 }
@@ -81,45 +86,41 @@ body.session-page {
   color: var(--dim);
 }
 
-#state::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-  opacity: 0.7;
-}
+/* Same glyph vocabulary as the dashboard card's `.status` — see styles.css,
+   which this page also loads (session.html links both stylesheets). */
+#state::before { content: ""; font-size: 11px; line-height: 1; }
+#state.working::before { content: "\2736"; }                      /* ✶ */
+#state.awaiting::before { content: "\25C6"; }                      /* ◆ */
+#state.permission::before { content: "\25B2"; }                    /* ▲ */
+#state.idle::before, #state.shell::before { content: "\25C7"; }    /* ◇ */
+#state.error::before, #state.dead::before { content: "\2717"; }    /* ✗ */
 
 #state.busy,
 #state.working {
-  background: var(--warning-bg);
-  border-color: var(--warning-border);
-  color: var(--warning-active);
-}
-
-#state.busy::before,
-#state.working::before {
-  background: var(--warning);
-  opacity: 1;
-  animation: cb-pulse 1.4s ease-in-out infinite;
+  background: var(--fill-tertiary);
+  border-color: var(--box);
+  color: var(--box);
 }
 
 #state.permission,
-#state.awaiting,
 #state.error {
   background: var(--error-bg);
-  border-color: var(--error-border);
-  color: var(--error-active);
+  border-color: var(--status-permission);
+  color: var(--status-permission);
 }
 
-#state.permission::before,
-#state.error::before {
-  background: var(--error);
-  opacity: 1;
-  animation: cb-pulse 1.4s ease-in-out infinite;
+#state.awaiting {
+  background: rgba(224, 123, 194, 0.14);
+  border-color: var(--status-awaiting);
+  color: var(--status-awaiting);
 }
 
-#state.awaiting::before { background: var(--error); opacity: 1; }
+/* Slow pulse, not the terminal's own blink rate — see styles.css's
+   cb-status-blink for the reduced-motion pairing this must stay next to. */
+#state.awaiting::before,
+#state.permission::before {
+  animation: cb-status-blink 2.2s ease-in-out infinite;
+}
 
 .viewtoggle { flex: 0 0 auto; }
 .viewtoggle[hidden] { display: none; }
@@ -487,7 +488,11 @@ table.md a:hover { text-decoration: underline; }
 @media (prefers-reduced-motion: reduce) {
   .working .dot,
   .toolrow.running .tooldot,
-  #state::before { animation: none; }
+  /* #state.awaiting/.permission are more specific than #state alone, so they
+     must be named here too or reduced motion would not win. */
+  #state::before,
+  #state.awaiting::before,
+  #state.permission::before { animation: none; }
 }
 
 .statusbar {
@@ -495,7 +500,8 @@ table.md a:hover { text-decoration: underline; }
   display: flex;
   align-items: center;
   gap: 20px;
-  padding: 7px 24px;
+  /* env() for a notched screen in landscape (Task 3 defect 3). */
+  padding: 7px calc(24px + env(safe-area-inset-right, 0px)) 7px calc(24px + env(safe-area-inset-left, 0px));
   background: var(--bg);
   border-top: 1px solid var(--line);
   font-family: var(--font-code);
@@ -543,7 +549,11 @@ table.md a:hover { text-decoration: underline; }
   display: flex;
   gap: 8px;
   align-items: flex-end;
-  padding: 12px max(24px, calc((100% - 760px) / 2)) 14px;
+  /* calc(...) rather than max(): the bottom side must ADD the safe area on
+     top of the existing 14px, not replace it with whichever is larger — the
+     home indicator sits below the text, not instead of the padding around it
+     (Task 3 defect 3). */
+  padding: 12px max(24px, calc((100% - 760px) / 2)) calc(14px + env(safe-area-inset-bottom, 0px));
   background: var(--bg);
   border-top: 1px solid var(--line);
 }
@@ -556,7 +566,8 @@ table.md a:hover { text-decoration: underline; }
   max-height: 9rem;
   padding: 9px 14px;
   font-family: var(--font-prose);
-  font-size: 14.5px;
+  /* 16px: below this, iOS Safari zooms the page on focus (Task 3 defect 2). */
+  font-size: 16px;
   line-height: 1.5;
   resize: vertical;
   color: var(--text);
@@ -594,12 +605,39 @@ table.md a:hover { text-decoration: underline; }
 #stop[hidden] { display: none; }
 
 /* The terminal stays dark, because terminals are. */
+#termwrap { flex: 1 1 auto; min-height: 0; position: relative; display: flex; }
+#termwrap[hidden] { display: none; }
 #term { flex: 1 1 auto; min-height: 0; padding: 8px 12px; background: var(--code-bg); }
 #term .xterm { height: 100%; }
 
+/* Touch scroll: tmux owns the pane, so a drag has nothing of its own to
+   scroll — the only path is the {type:"scroll"} control frame session.js
+   already sends for the mouse wheel. These two buttons drive that same frame
+   (Task 3 defect 5). 44px each, thumb-reachable over the bottom corner. */
+.termscroll {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  z-index: 2;
+}
+
+.termscroll button {
+  width: 44px;
+  padding: 0;
+  background: rgba(11, 14, 19, 0.85);
+  border-color: var(--border);
+  color: var(--text);
+  font-size: 16px;
+}
+
 footer#bar {
   flex: 0 0 auto;
-  padding: 6px 24px;
+  /* env() for the home indicator — this is the true bottom edge whenever the
+     composer is hidden (the terminal view; Task 3 defect 3). */
+  padding: 6px calc(24px + env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) calc(24px + env(safe-area-inset-left, 0px));
   background: var(--bg);
   border-top: 1px solid var(--line);
   font-family: var(--font-code);
@@ -622,7 +660,7 @@ footer#bar.bad { background: var(--error-bg); border-top-color: var(--error-bord
 
 /* ---- harness notes ------------------------------------------------------
    Background-task events and slash-command plumbing arrive as "user" turns.
-   They carry real information — "MERGED: calder_tasks#633" comes through this
+   They carry real information — "MERGED: myrepo#633" comes through this
    way — but they are events, not conversation, so they read as marginalia:
    one line, mono, dim, no speaker. Rendered raw they were angle brackets and
    tool ids in the middle of a paragraph. */

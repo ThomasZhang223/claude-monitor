@@ -1,49 +1,71 @@
-/* The Calder design system, light. Ant Design 5-aligned.
-   Values are final, from the design handoff — the ink scale is one family of
-   alphas over #16273a, so every neutral is the same hue at a different weight
-   rather than a separate grey someone picked.
+/* claude-monitor's own palette, dark. The monitor is a dark terminal, and
+   this page is its web companion — see STATUS_STYLES (core/src/model.ts:266)
+   and PALETTE (core/src/palette.ts) for the two things this block must never
+   disagree with: what a status colour means, and that a box colour never
+   lands in the red or magenta band a status colour already owns.
 
-   This palette is shared by the dashboard and the session page ON PURPOSE. The
-   handoff only specified the session page, but its token block is this one, and
-   two pages of one tool must not disagree about what "needs you" looks like. */
+   This palette is shared by the dashboard and the session page ON PURPOSE,
+   same as claude-board's original: two pages of one tool must not disagree
+   about what "needs you" looks like. */
 :root {
-  --bg-layout: #f5f7f9;            /* page ground */
-  --bg: #ffffff;                   /* header, strip, bars, cards */
+  --bg-layout: #14171c;            /* page ground */
+  --bg: #1b1f26;                   /* header, strip, bars, cards */
 
-  --text: rgba(22, 39, 58, 0.88);
-  --text-heading: rgba(22, 39, 58, 0.92);
-  --dim: rgba(22, 39, 58, 0.65);
-  --subtle: rgba(22, 39, 58, 0.45);
-  --faint: rgba(22, 39, 58, 0.25);
+  --text: rgba(224, 228, 235, 0.88);
+  --text-heading: rgba(224, 228, 235, 0.94);
+  --dim: rgba(224, 228, 235, 0.66);
+  --subtle: rgba(224, 228, 235, 0.46);
+  --faint: rgba(224, 228, 235, 0.26);
 
-  --line: #ebeef2;                 /* splits */
-  --border: #e1e6eb;
-  --fill-quaternary: rgba(22, 39, 58, 0.02);
-  --fill-tertiary: rgba(22, 39, 58, 0.04);
-  --fill-secondary: rgba(22, 39, 58, 0.08);
+  --line: #262b33;                 /* splits */
+  --border: #333a44;
+  --fill-quaternary: rgba(224, 228, 235, 0.03);
+  --fill-tertiary: rgba(224, 228, 235, 0.05);
+  --fill-secondary: rgba(224, 228, 235, 0.09);
 
-  --accent: #2568b0;               /* Calder cobalt — primary, and "you" */
-  --accent-bg: #eaf1f9;
-  --accent-border: #b8d1e8;
-  --accent-hover: #3d7cbf;
+  --accent: #6fa8dc;               /* primary, and "you" */
+  --accent-bg: rgba(111, 168, 220, 0.14);
+  --accent-border: rgba(111, 168, 220, 0.4);
+  --accent-hover: #8bbae3;
 
-  --success: #2f8a5c;
-  --success-bg: #e6f3ec;
-  --success-border: #b7dcc6;
-  --success-active: #206c45;
+  --success: #4ade80;
+  --success-bg: rgba(74, 222, 128, 0.14);
+  --success-border: rgba(74, 222, 128, 0.4);
+  --success-active: #6ee89c;
 
-  --warning: #f1b551;
-  --warning-bg: #fbf0dc;
-  --warning-border: #f3d499;
-  --warning-active: #c88512;
+  --warning: #f0b429;
+  --warning-bg: rgba(240, 180, 41, 0.14);
+  --warning-border: rgba(240, 180, 41, 0.4);
+  --warning-active: #f5c451;
 
-  --error: #e0513d;
-  --error-bg: #fbece9;
-  --error-border: #f3c2b9;
-  --error-active: #c94430;
+  /* STATUS_STYLES (core/src/model.ts:266) — the vocabulary a card's pill,
+     glyph and border are drawn from. `working` carries no fixed colour there
+     ("the box's own colour"), so it has no token of its own: it reads `--box`
+     instead (defaulted below, overridden per card by board/web/app.js). */
+  --status-awaiting: #e07bc2;      /* magenta, blinks */
+  --status-permission: #e16072;    /* red, blinks */
+  --status-error: #e16072;         /* red, steady */
+  --status-idle: #8c8f96;          /* gray */
 
-  /* Code blocks are INVERTED panels: dark islands in a light page. Machine
-     output reads as machine output without needing a label to say so. */
+  /* Generic "something failed" tint — the failed-tool row, the error footer
+     bar — kept as the SAME red as a permission prompt rather than a second
+     one: a page should not carry two reds meaning slightly different things. */
+  --error: var(--status-permission);
+  --error-bg: rgba(225, 96, 114, 0.14);
+  --error-border: rgba(225, 96, 114, 0.4);
+  --error-active: #ec8d9a;
+
+  /* A box's own colour (core/src/config.ts's BoxDef.color, drawn from
+     core/src/palette.ts's PALETTE) is user configuration, so it cannot be a
+     literal here. This is only the DEFAULT for a card board/web/app.js has
+     not yet stamped with its own hex, inline, per card — every rendered
+     card overrides it once GET /api/config has answered. */
+  --box: var(--accent);
+
+  /* Code blocks are INVERTED panels, same as claude-board's original — a dark
+     terminal ground makes them read as machine output even more directly now
+     that the whole page is dark too. Kept LITERAL, not re-derived: the one
+     value that carries over unchanged. */
   --code-bg: #16273a;
   --code-head: #1f2a35;
   --code-text: #dbe4ee;
@@ -51,31 +73,27 @@
   --radius: 6px;
   --radius-lg: 8px;
   --radius-card: 10px;
-  --focus-ring: 0 0 0 2px rgba(37, 104, 176, 0.12);
-  --shadow-sm: 0 1px 2px rgba(22, 39, 58, 0.03), 0 1px 6px rgba(22, 39, 58, 0.02);
+  --focus-ring: 0 0 0 2px rgba(111, 168, 220, 0.3);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25), 0 1px 6px rgba(0, 0, 0, 0.18);
 
   /* Named first in case they are installed; the system stacks carry it
-     otherwise. No webfont link: this serves localhost and a tailnet, and a page
-     that waits on fonts.googleapis.com to render text breaks when the network
-     does. */
+     otherwise. No webfont link: this serves localhost and whatever tunnel the
+     user puts in front of it, and a page that waits on fonts.googleapis.com
+     to render text breaks when the network does. */
   --font-prose: "Inter Tight", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-code: "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, Menlo, monospace;
 
   /* ---- what the DASHBOARD calls things -----------------------------------
-     The handoff did not name these, because it covered one page. They are
-     aliases onto the scale above rather than new colours, so a state cannot
-     mean one thing on a card and another in a session. */
+     Aliases onto the scale above rather than new colours, so a state cannot
+     mean one thing on a card and another in a session. `--working` reads the
+     box's own colour, per STATUS_STYLES. */
   --panel: var(--bg);
   --panel-2: var(--fill-quaternary);
 
-  /* Three states, and the colour says which at a glance across the room:
-       red    — it needs YOU (waiting, blocked on a permission, errored)
-       yellow — Claude is working; leave it alone
-       grey   — idle, in a shell, or ended; nothing is happening */
-  --needs-you: var(--error);
-  --needs-you-urgent: var(--error-active);
-  --working: var(--warning);
-  --idle: var(--subtle);
+  --needs-you: var(--status-permission);
+  --needs-you-urgent: var(--status-permission);
+  --working: var(--box);
+  --idle: var(--status-idle);
   --ended: var(--faint);
   --tint-needs-you: var(--error-bg);
   --tint-working: var(--warning-bg);
@@ -84,7 +102,7 @@
      strip both key off these, so a PR cannot be green in one place and
      uncoloured in the other — which it was, because the strip referenced a
      variable that had since been deleted. Merged is the ACCENT here, not
-     purple: the handoff maps it that way, and this palette has one blue. */
+     purple: this palette has one blue. */
   --pr-open: var(--success-border);
   --pr-open-text: var(--success-active);
   --pr-open-fill: var(--success-bg);
@@ -92,7 +110,7 @@
   --pr-draft: var(--border);
   --pr-draft-text: var(--dim);
   --pr-draft-fill: var(--fill-quaternary);
-  --pr-draft-dot: #b4bec8;
+  --pr-draft-dot: #5b6270;
   --pr-queued: var(--warning-border);
   --pr-queued-text: var(--warning-active);
   --pr-queued-fill: var(--warning-bg);
@@ -104,13 +122,13 @@
   --pr-closed: var(--border);
   --pr-closed-text: var(--subtle);
   --pr-closed-fill: var(--fill-quaternary);
-  --pr-closed-dot: #b4bec8;
+  --pr-closed-dot: #5b6270;
 
   /* The number chip on a picker option: a key cap, not a status. */
   --ask-badge: var(--fill-secondary);
 }
 
-/* The board. Calder design system, light — see the V2 handoff.
+/* The board, dark — claude-monitor's own palette.
    Shares its palette with the session page: one tool, one set of meanings. */
 
 * { box-sizing: border-box; }
@@ -132,7 +150,10 @@ body > header {
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 12px 28px;
+  /* `viewport-fit=cover` (index.html) puts the page under the notch and the
+     status bar; env() gives it back (Task 3 defect 3). Falls back to 0px on
+     a browser that does not support env(), which is the existing padding. */
+  padding: calc(12px + env(safe-area-inset-top, 0px)) calc(28px + env(safe-area-inset-right, 0px)) 12px calc(28px + env(safe-area-inset-left, 0px));
   background: var(--bg);
   border-bottom: 1px solid var(--line);
 }
@@ -200,18 +221,20 @@ section h2 {
   padding: 16px 18px;
   background: var(--bg);
   border: 1px solid var(--line);
-  border-top: 3px solid var(--faint);
+  border-left: 3px solid var(--box);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-sm);
 }
 
-/* State lives on the TOP edge, so a wall of cards reads as a row of coloured
-   ticks before you read a single word. */
-.card.busy, .card.working { border-top-color: var(--warning); }
-.card.permission, .card.error { border-top-color: var(--error); }
-.card.awaiting { border-top-color: var(--error); }
-.card.idle, .card.shell { border-top-color: var(--faint); }
-.card.ended { border-top-color: var(--line); opacity: 0.85; }
+/* A needs-you status rings the whole card, so a wall of cards reads as which
+   ones want you before you read a single word. Working and idle get no ring
+   of their own — STATUS_STYLES gives `working` no fixed colour at all, and
+   the box tint on the left edge already carries this card's identity. */
+.card.awaiting { border-top-color: var(--status-awaiting); border-right-color: var(--status-awaiting); border-bottom-color: var(--status-awaiting); }
+.card.permission { border-top-color: var(--status-permission); border-right-color: var(--status-permission); border-bottom-color: var(--status-permission); }
+.card.error { border-top-color: var(--status-error); border-right-color: var(--status-error); border-bottom-color: var(--status-error); }
+.card.idle, .card.shell, .card.dead { opacity: 0.85; }
+.card.ended { opacity: 0.75; }
 
 .card-top {
   display: flex;
@@ -249,25 +272,35 @@ section h2 {
   white-space: nowrap;
 }
 
-.status::before {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-  opacity: 0.7;
-}
+/* The glyph IS the status — the same ones STATUS_STYLES (core/src/model.ts:266)
+   draws in the terminal, so a card and a pane must never disagree about what
+   a status looks like. */
+.status::before { content: ""; font-size: 11px; line-height: 1; }
+.status.working::before { content: "\2736"; }                        /* ✶ */
+.status.awaiting::before { content: "\25C6"; }                        /* ◆ */
+.status.permission::before { content: "\25B2"; }                      /* ▲ */
+.status.idle::before, .status.shell::before { content: "\25C7"; }     /* ◇ */
+.status.error::before, .status.dead::before { content: "\2717"; }     /* ✗ */
 
+/* `working` has no fixed colour in STATUS_STYLES — it takes the box's own
+   colour, so two working cards from two boxes read as two different colours. */
 .status.busy, .status.working {
-  background: var(--warning-bg); border-color: var(--warning-border); color: var(--warning-active);
+  background: var(--fill-tertiary); border-color: var(--box); color: var(--box);
 }
-.status.busy::before, .status.working::before { background: var(--warning); opacity: 1; animation: cb-pulse 1.4s ease-in-out infinite; }
 
-.status.permission, .status.error, .status.awaiting {
-  background: var(--error-bg); border-color: var(--error-border); color: var(--error-active);
+.status.permission, .status.error {
+  background: var(--error-bg); border-color: var(--status-permission); color: var(--status-permission);
 }
-.status.permission::before, .status.error::before { background: var(--error); opacity: 1; animation: cb-pulse 1.4s ease-in-out infinite; }
-.status.awaiting::before { background: var(--error); opacity: 1; }
+.status.awaiting {
+  background: rgba(224, 123, 194, 0.14); border-color: var(--status-awaiting); color: var(--status-awaiting);
+}
+
+/* The terminal's blink, slowed into something a phone screen can sit beside
+   without being distracting. STATUS_STYLES marks only `awaiting` and
+   `permission` as blinking; `error` is the same red held steady. */
+.status.awaiting::before, .status.permission::before {
+  animation: cb-status-blink 2.2s ease-in-out infinite;
+}
 
 /* An ended session's card says WHEN, not what state it is in — the state is
    "over", which the whole card already shows. */
@@ -295,6 +328,14 @@ section h2 {
   font-size: 11.5px;
   color: var(--subtle);
 }
+
+/* One row per pane (core/src/model.ts's PaneRecord), shown only on a
+   multi-pane DEEP WORK session — see render.js's paneRows(). Reuses the
+   `.status` pill wholesale rather than a second status vocabulary. */
+.panes { display: flex; flex-direction: column; gap: 4px; }
+.panerow { display: flex; align-items: center; gap: 8px; font-family: var(--font-code); font-size: 11.5px; color: var(--subtle); }
+.panelabel { color: var(--dim); }
+.panectx { margin-left: auto; }
 
 /* ---- PR pills ------------------------------------------------------------ */
 .prs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
@@ -366,6 +407,9 @@ button {
   font-family: var(--font-prose);
   font-size: 12.5px;
   padding: 5px 12px;
+  /* 44px: the platform minimum tap target (Task 3 mobile defect 4) — was
+     ~27px, which is fine with a mouse and not with a thumb. */
+  min-height: 44px;
   border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--bg);
@@ -399,7 +443,8 @@ button.danger:hover:not(:disabled) {
   min-width: 0;
   padding: 5px 10px;
   font-family: var(--font-prose);
-  font-size: 12.5px;
+  /* 16px: below this, iOS Safari zooms the page on focus (Task 3 defect 2). */
+  font-size: 16px;
   color: var(--text);
   background: var(--fill-quaternary);
   border: 1px solid var(--border);
@@ -450,7 +495,7 @@ button.danger:hover:not(:disabled) {
   align-items: flex-start;
   gap: 10px;
   width: 100%;
-  min-height: 40px;
+  min-height: 44px;
   padding: 8px 10px;
   text-align: left;
   font-family: var(--font-prose);
@@ -518,7 +563,8 @@ dialog h2 { margin: 0 0 10px; font-size: 15px; font-weight: 600; color: var(--te
   width: 100%;
   padding: 7px 12px;
   font-family: var(--font-prose);
-  font-size: 13.5px;
+  /* 16px: below this, iOS Safari zooms the page on focus (Task 3 defect 2). */
+  font-size: 16px;
   color: var(--text);
   background: var(--bg);
   border: 1px solid var(--border);
@@ -536,7 +582,8 @@ dialog h2 { margin: 0 0 10px; font-size: 15px; font-weight: 600; color: var(--te
 footer {
   position: sticky;
   bottom: 0;
-  padding: 10px 28px;
+  /* Sits on the home indicator without env() (Task 3 defect 3). */
+  padding: 10px calc(28px + env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom, 0px)) calc(28px + env(safe-area-inset-left, 0px));
   background: var(--error-bg);
   border-top: 1px solid var(--error-border);
   color: var(--error-active);
@@ -548,8 +595,17 @@ footer {
   50% { opacity: 1; }
 }
 
+@keyframes cb-status-blink {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .status::before { animation: none; }
+  /* The awaiting/permission rule above is more specific than `.status::before`
+     alone, so it must be named here too or reduced motion would not win. */
+  .status::before,
+  .status.awaiting::before,
+  .status.permission::before { animation: none; }
 }
 
 @media (max-width: 560px) {

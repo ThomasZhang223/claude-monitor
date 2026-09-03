@@ -58,6 +58,9 @@ const STATUS_LABEL = {
   idle: "idle",
   shell: "shell",
   ended: "ended",
+  // STATUS_STYLES (core/src/model.ts:266) also has `dead` — a session whose
+  // process is gone without going through this UI's own "end session".
+  dead: "dead",
 };
 
 /**
@@ -120,9 +123,36 @@ function attachNote(s) {
   return "";
 }
 
+/**
+ * One pane's own row, reusing the `.status` pill wholesale rather than
+ * inventing a second status vocabulary for it — a pane's status is drawn
+ * from the exact same STATUS_STYLES as the card's own.
+ */
+function paneRow(p) {
+  const ctx = p.contextPct != null ? `<span class="panectx">ctx ${esc(p.contextPct)}%</span>` : "";
+  return `<div class="panerow">
+    <span class="status ${esc(p.status)}"></span>
+    <span class="panelabel">pane ${esc(p.windowIndex)}.${esc(p.paneIndex)}</span>
+    ${ctx}
+  </div>`;
+}
+
+/**
+ * A row per pane, as the TUI shows them — `core/src/model.ts`'s `PaneRecord`
+ * carries one status per pane, not one per session. Rendered only for a
+ * multi-pane (DEEP WORK) session: a single-pane card already says its status
+ * in the header, and a row repeating it is furniture with no new information.
+ */
+function paneRows(panes) {
+  if (!panes || panes.length < 2) return "";
+  return `<div class="panes">${panes.map(paneRow).join("")}</div>`;
+}
+
 function card(s) {
+  const boxStyle = s.boxColor ? ` style="--box:${esc(s.boxColor)}"` : "";
   const facts = [
     repoShort(s.repo),
+    s.mode,
     s.model,
     s.contextPct != null ? `ctx ${s.contextPct}%` : null,
     s.costUsd != null ? `$${s.costUsd.toFixed(2)}` : null,
@@ -152,7 +182,7 @@ function card(s) {
     none: `<button disabled title="No transcript to open.">No terminal</button>`,
   }[s.attach];
 
-  return `<article class="card ${esc(s.status)}">
+  return `<article class="card ${esc(s.status)}"${boxStyle}>
     <div class="card-top">
       <span class="title">${esc(s.title)}${s.shortId ? `<span class="shortid"> ${esc(s.shortId)}</span>` : ""}</span>
       <span class="status ${esc(s.status)}">${esc(STATUS_LABEL[s.status] ?? s.status)}</span>
@@ -161,6 +191,7 @@ function card(s) {
     ${describe(s)}
     ${askPanel(s.prompt, s.sessionId)}
     <div class="facts">${facts.map((f) => `<span>${esc(f)}</span>`).join("")}</div>
+    ${paneRows(s.panes)}
     ${prs}
     ${attachNote(s)}
     <div class="actions">${actions}</div>
@@ -228,10 +259,46 @@ function askPanel(prompt, sessionId) {
   </div>`;
 }
 
-function section(title, items, extra = "") {
+/** `color` is a box's own colour (core/src/config.ts's BoxDef.color), tinting
+ *  the group heading the same way its cards' left edge is tinted — the group
+ *  a box's sessions sit under should read as that box's own colour, the same
+ *  as the TUI's box-grouped rows. Omitted for the unboxed and ended groups,
+ *  which belong to no box. */
+function section(title, items, extra = "", color = null) {
+  if (items.length === 0) return "";
+  const style = color ? ` style="color:${esc(color)}"` : "";
+  return `<section><h2${style}>${esc(title)} · ${items.length}</h2>
+    <div class="grid">${items.map(card).join("")}</div>${extra}</section>`;
+}
+
+/**
+ * A registered Claude Code session `collectSessions()` cannot see — started
+ * by hand, outside the `cc-<box>-` tmux naming convention that gives a
+ * session its box, colour and panes.
+ *
+ * ceiling: `core/src/claude.ts`'s `ClaudeSession` carries no tmux target for
+ * these, so board has no pane to attach a terminal to or send keys into —
+ * this card is read-only until core exposes one. Shown anyway, plainly, per
+ * the same rule `askPanel`'s undrivable options follow: an option (or here, a
+ * whole session) board cannot act on is shown and explained, not hidden.
+ */
+function unboxedCard(u) {
+  const title = u.name || (u.cwd ? u.cwd.split("/").pop() : null) || u.sessionId;
+  const status = !u.live ? "dead" : u.rawStatus === "waiting" ? "awaiting" : u.rawStatus === "busy" ? "working" : "idle";
+  return `<article class="card ${esc(status)}">
+    <div class="card-top">
+      <span class="title">${esc(title)}</span>
+      <span class="status ${esc(status)}">${esc(STATUS_LABEL[status] ?? status)}</span>
+    </div>
+    <div class="facts"><span>${esc(u.cwd)}</span><span>pid ${esc(u.pid)}</span></div>
+    <div class="viewnote elsewhere">started by hand — outside a box, so board has no terminal for it yet</div>
+  </article>`;
+}
+
+function unboxedSection(title, items) {
   if (items.length === 0) return "";
   return `<section><h2>${esc(title)} · ${items.length}</h2>
-    <div class="grid">${items.map(card).join("")}</div>${extra}</section>`;
+    <div class="grid">${items.map(unboxedCard).join("")}</div></section>`;
 }
 
 /**
@@ -250,4 +317,7 @@ function moreButton(shown, total) {
 }
 
 
-export { esc, ago, repoShort, STATUS_LABEL, describe, splitPrs, prBlock, attachNote, askPanel, steer, card, section, moreButton };
+export {
+  esc, ago, repoShort, STATUS_LABEL, describe, splitPrs, prBlock, attachNote, askPanel, steer,
+  paneRow, paneRows, card, section, unboxedCard, unboxedSection, moreButton,
+};

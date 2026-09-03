@@ -10,6 +10,19 @@
  * It is a websocket to a pty running `tmux attach`, and closing this tab is a
  * DETACH, not a stop — the tmux session keeps running. That is not code here;
  * it is what tmux does.
+ *
+ * Addressing changed from claude-board's original port: board's own model
+ * (board/src/sessions.ts's SessionView) has no per-pane Claude session id on
+ * the wire, so this page addresses everything by tmux session name, not a
+ * Claude id — matching board/src/ws.ts, which already resolves a terminal
+ * that way. Two query params carry it, for the two attach paths ws.ts has:
+ *   ?tmux=<name>   an EXISTING session (opened from the dashboard) — the
+ *                  grouped /ws/term/<name> path, resolved via findSession().
+ *   ?fresh=<name>  a session board just spawned/resumed/forked, too new for
+ *                  the 900ms listing cache to have picked up — the direct
+ *                  /ws/tmux/<name> attach path, skipping that lookup.
+ * A push notification's #s=&w=&p= hash (board/web/sw.js's own scheme) is a
+ * third way in, aliased onto the "existing session" case.
  */
 import { Terminal } from "/vendor/xterm/xterm.mjs";
 import { FitAddon } from "/vendor/xterm-fit/addon-fit.mjs";
@@ -19,10 +32,14 @@ import { askPanel, prBlock } from "/render.js";
 import { composerState, conversation, groupHtml, groups, statusBar } from "/chat.js";
 
 const params = new URLSearchParams(location.search);
-const id = params.get("id");
-/** A tmux session board just created (a resume or fork). It has no Claude
- *  session id yet, so it is addressed by tmux name instead. */
-const tmuxName = params.get("tmux");
+const hashParams = new URLSearchParams(location.hash.replace(/^#/, ""));
+const freshName = params.get("fresh");
+/** The tmux session name this page addresses everything by. */
+const tmuxName = freshName || params.get("tmux") || hashParams.get("s");
+/** A specific pane within it — a push notification or a dashboard card names
+ *  one; absent, this defaults to the session's first pane. */
+const paneWindow = Number(params.get("w") ?? hashParams.get("w") ?? 0);
+const panePane = Number(params.get("p") ?? hashParams.get("p") ?? 0);
 const titleEl = document.getElementById("title");
 const stateEl = document.getElementById("state");
 const prsEl = document.getElementById("prs");
@@ -105,35 +122,23 @@ window.__boardTerm = term;
 fit.fit();
 
 async function loadSession() {
-  // Two ways in: by Claude session id, or by the tmux name of a session board
-  // just made. The second has no id yet, so it is resolved through its tmux
-  // session — which is what lets the PR strip work there too.
-  const path = tmuxName
-    ? `/api/by-tmux/${encodeURIComponent(tmuxName)}`
-    : `/api/sessions/${encodeURIComponent(id)}`;
-  const res = await fetch(path, { credentials: "same-origin" });
+  const res = await fetch(`/api/by-tmux/${encodeURIComponent(tmuxName)}`, { credentials: "same-origin" });
   if (!res.ok) throw new Error(`session lookup failed (${res.status})`);
   const s = await res.json();
   titleEl.textContent = s.title;
   stateEl.textContent = s.status;
   stateEl.className = `status ${s.status}`;
-  document.title = `${s.title} · claude-board`;
+  document.title = `${s.title} · board`;
   return s;
 }
 
-/** One PR as a row in the strip. */
-
-async function loadPrs(sessionId) {
-  if (!sessionId) return note("no PR list: this session has no id yet");
+async function loadPrs() {
   try {
-    const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/prs`, { credentials: "same-origin" });
+    const res = await fetch(`/api/sessions/${encodeURIComponent(tmuxName)}/prs`, { credentials: "same-origin" });
     if (!res.ok) return note(`no PR list: server said ${res.status}`);
     const { prs } = await res.json();
     // The dashboard card's renderer, not a second one of our own. It already
-    // folds the finished PRs, colours by phase, and is unit-tested; the private
-    // copy that used to live here also carried each PR's title and CI summary,
-    // which turned five PRs into five full-width bars above a page whose job is
-    // the conversation. A pill and its colour is what a link needs to be.
+    // folds the finished PRs, colours by phase, and is unit-tested.
     prsEl.innerHTML = prBlock({ prs });
     if (prs.length === 0) note("no PRs linked to this session yet");
   } catch (e) {
@@ -145,9 +150,12 @@ async function loadPrs(sessionId) {
 
 function connect() {
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  const path = tmuxName
+  // `?fresh=` is too new for findSession()'s listing cache — attach directly,
+  // skipping the lookup /ws/term/ makes. Everything else goes through the
+  // grouped view, which is what lets more than one tab watch the same pane.
+  const path = freshName
     ? `/ws/tmux/${encodeURIComponent(tmuxName)}`
-    : `/ws/term/${encodeURIComponent(id)}`;
+    : `/ws/term/${encodeURIComponent(tmuxName)}`;
   const ws = new WebSocket(`${proto}//${location.host}${path}`);
   ws.binaryType = "arraybuffer";
 
@@ -157,6 +165,28 @@ function connect() {
       ws.send("\x00" + JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
     }
   };
+
+  // The wheel AND the two scroll buttons share one path: both are a tmux
+  // scroll COMMAND, never keystrokes. tmux is a full-screen application, so
+  // xterm has no scrollback of its own to move — left alone it converts the
+  // wheel into arrow keys, and Claude Code reads those as "previous prompt".
+  // Batched on a frame so a fast flick, or a held button, is one tmux call
+  // rather than many.
+  let pendingLines = 0;
+  let flush = null;
+  function queueScroll(lines) {
+    pendingLines += lines;
+    if (!flush) {
+      flush = setTimeout(() => {
+        const n = pendingLines;
+        pendingLines = 0;
+        flush = null;
+        if (n && ws.readyState === WebSocket.OPEN) {
+          ws.send("\x00" + JSON.stringify({ type: "scroll", lines: n }));
+        }
+      }, 40);
+    }
+  }
 
   ws.onopen = () => say("connecting…");
   ws.onmessage = (ev) => {
@@ -176,7 +206,7 @@ function connect() {
         // works depends on whether the application is holding mouse tracking
         // at that moment, and it changes as the session works. Shift is the
         // override for when it IS — measured both ways.
-        say(`attached to ${msg.session} — scroll for history, drag to select `
+        say(`attached to ${msg.session} — scroll or use the up/down buttons for history, drag to select `
           + `(SHIFT-drag if a plain drag does not); `
           + `closing this tab detaches and the session keeps running`);
         sendResize();
@@ -201,32 +231,36 @@ function connect() {
     if (ws.readyState === WebSocket.OPEN) ws.send(d);
   });
 
-  // The wheel is sent as a tmux scroll COMMAND, never as keystrokes.
-  //
-  // tmux is a full-screen application, so xterm has no scrollback of its own
-  // to move; left alone it converts the wheel into arrow keys, and Claude Code
-  // reads those as "previous prompt" — which is why scrolling walked the
-  // command history instead of the history. `false` stops xterm doing that.
-  //
-  // Notches are batched on a frame so a fast flick is one tmux call rather
-  // than thirty.
-  let pendingLines = 0;
-  let flush = null;
+  // wheel-up is negative deltaY, and scrolls back.
   term.attachCustomWheelEventHandler((ev) => {
     const lines = Math.round(ev.deltaY / 40) || (ev.deltaY > 0 ? 1 : -1);
-    pendingLines -= lines; // wheel-up is negative deltaY, and scrolls back
-    if (!flush) {
-      flush = setTimeout(() => {
-        const n = pendingLines;
-        pendingLines = 0;
-        flush = null;
-        if (n && ws.readyState === WebSocket.OPEN) {
-          ws.send("\x00" + JSON.stringify({ type: "scroll", lines: n }));
-        }
-      }, 40);
-    }
+    queueScroll(-lines);
     return false;
   });
+
+  // Touch has no wheel to repurpose (Task 3 defect 5) — these two buttons
+  // drive the same {type:"scroll"} frame. Held down, they repeat like a
+  // scrollbar's own arrows rather than firing once per tap.
+  function holdToScroll(btn, lines) {
+    let timer = null;
+    const fire = () => queueScroll(lines);
+    const start = (ev) => {
+      ev.preventDefault();
+      fire();
+      timer = setInterval(fire, 120);
+    };
+    const stop = () => {
+      if (timer) clearInterval(timer);
+      timer = null;
+    };
+    btn.addEventListener("pointerdown", start);
+    btn.addEventListener("pointerup", stop);
+    btn.addEventListener("pointerleave", stop);
+    btn.addEventListener("pointercancel", stop);
+  }
+  holdToScroll(document.getElementById("scrollup"), -3);
+  holdToScroll(document.getElementById("scrolldown"), 3);
+
   window.addEventListener("resize", sendResize);
   return ws;
 }
@@ -239,17 +273,25 @@ function connect() {
 //
 // This polls, unlike everything else on this page: the prompt appears and
 // disappears in the terminal without any websocket frame saying so.
+//
+// Pane-addressed (tmux name, window, pane), matching board/smoke/prompt.mts's
+// own /panes/:w/:p/{prompt,answer} route shape — a permission prompt belongs
+// to one specific pane, not to the session as a whole.
 const askEl = document.getElementById("ask");
 const ASK_POLL_MS = 2000;
-let askFor = null;
+const PROMPT_PATH = `/api/sessions/${encodeURIComponent(tmuxName)}/panes/${paneWindow}/${panePane}/prompt`;
+const answerPath = (index, fingerprint) =>
+  `/api/sessions/${encodeURIComponent(tmuxName)}/panes/${paneWindow}/${panePane}/answer` +
+  `?index=${encodeURIComponent(index)}&fingerprint=${encodeURIComponent(fingerprint)}`;
+let watchingAsk = false;
 
 async function pollAsk() {
-  if (!askFor) return;
+  if (!watchingAsk) return;
   try {
-    const res = await fetch(`/api/sessions/${encodeURIComponent(askFor)}/prompt`, { credentials: "same-origin" });
+    const res = await fetch(PROMPT_PATH, { credentials: "same-origin" });
     if (!res.ok) return;
     const body = await res.json();
-    askEl.innerHTML = askPanel(body.prompt, askFor);
+    askEl.innerHTML = askPanel(body.prompt, tmuxName);
   } catch {
     // A failed poll leaves the last panel up rather than blanking it. The
     // terminal is right there and still authoritative.
@@ -260,10 +302,7 @@ askEl.addEventListener("click", async (ev) => {
   const btn = ev.target.closest("[data-answer]");
   if (!btn) return;
   try {
-    const res = await fetch(
-      `/api/sessions/${encodeURIComponent(btn.dataset.answer)}/answer?index=${encodeURIComponent(btn.dataset.index)}&fingerprint=${encodeURIComponent(btn.dataset.fp)}`,
-      { method: "POST", credentials: "same-origin" },
-    );
+    const res = await fetch(answerPath(btn.dataset.index, btn.dataset.fp), { method: "POST", credentials: "same-origin" });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.error ?? `could not answer (${res.status})`);
     askEl.innerHTML = "";
@@ -273,10 +312,10 @@ askEl.addEventListener("click", async (ev) => {
   pollAsk();
 });
 
-/** Start watching for questions once the session's Claude id is known. */
-function watchAsk(sessionId) {
-  if (!sessionId) return;
-  askFor = sessionId;
+/** Start watching for questions once the session is known to be a live tmux
+ *  one — an ended or non-tmux session has no pane for a prompt to be on. */
+function watchAsk() {
+  watchingAsk = true;
   pollAsk();
   setInterval(pollAsk, ASK_POLL_MS);
 }
@@ -289,7 +328,7 @@ function watchAsk(sessionId) {
 // so this stays cheap on a 49 MB transcript.
 const chatEl = document.getElementById("chat");
 const emptyEl = document.getElementById("chatempty");
-const termEl = document.getElementById("term");
+const termwrapEl = document.getElementById("termwrap");
 const composerEl = document.getElementById("composer");
 const sayEl = document.getElementById("say");
 const stopEl = document.getElementById("stop");
@@ -302,7 +341,7 @@ const CHAT_POLL_MS = 1500;
 const earlierWrap = document.getElementById("earlierwrap");
 const earlierBtn = document.getElementById("earlier");
 
-let chatFor = null;
+let watchingChat = false;
 let cursor = null;
 /** Where the loaded window BEGINS. "Load earlier" reads backwards from here. */
 let earliest = null;
@@ -346,7 +385,7 @@ function atBottom() {
 let polling = false;
 
 async function pollChat() {
-  if (!chatFor) return;
+  if (!watchingChat) return;
   // One poll at a time. The interval is 1.5s and a request can take longer —
   // /api/sessions/:id/messages reads a file and the server may be reading panes
   // — so two polls can be in flight at once. Both then see the same cursor,
@@ -356,7 +395,7 @@ async function pollChat() {
   polling = true;
   try {
     const q = cursor === null ? "" : `?after=${encodeURIComponent(cursor)}`;
-    const res = await fetch(`/api/sessions/${encodeURIComponent(chatFor)}/messages${q}`, {
+    const res = await fetch(`/api/sessions/${encodeURIComponent(tmuxName)}/messages${q}`, {
       credentials: "same-origin",
     });
     if (!res.ok) return;
@@ -431,12 +470,12 @@ async function pollChat() {
  * scrolls you backwards away from what you were reading.
  */
 async function loadEarlier() {
-  if (!chatFor || earliest === null || earliest <= 0) return;
+  if (earliest === null || earliest <= 0) return;
   earlierBtn.disabled = true;
   earlierBtn.textContent = "loading…";
   try {
     const res = await fetch(
-      `/api/sessions/${encodeURIComponent(chatFor)}/messages?before=${encodeURIComponent(earliest)}`,
+      `/api/sessions/${encodeURIComponent(tmuxName)}/messages?before=${encodeURIComponent(earliest)}`,
       { credentials: "same-origin" },
     );
     if (!res.ok) throw new Error(`could not read earlier (${res.status})`);
@@ -460,7 +499,7 @@ earlierBtn.addEventListener("click", loadEarlier);
 // Catch up the moment a selection is released, rather than making you wait for
 // the next poll to see what arrived while you were reading.
 document.addEventListener("selectionchange", () => {
-  if (!selectingInChat() && chatFor) drawTail();
+  if (!selectingInChat() && watchingChat) drawTail();
 });
 
 // Cycling the permission mode. The terminal binds shift+tab for this and there
@@ -471,7 +510,7 @@ statusBarEl.addEventListener("click", async (ev) => {
   if (!btn) return;
   btn.disabled = true;
   try {
-    const res = await fetch(`/api/sessions/${encodeURIComponent(btn.dataset.mode)}/mode`, {
+    const res = await fetch(`/api/sessions/${encodeURIComponent(tmuxName)}/mode`, {
       method: "POST",
       credentials: "same-origin",
     });
@@ -487,9 +526,8 @@ statusBarEl.addEventListener("click", async (ev) => {
 
 /** Re-read the session so the meters and mode stay current. */
 async function refreshSession() {
-  if (!chatFor) return;
   try {
-    const res = await fetch(`/api/sessions/${encodeURIComponent(chatFor)}`, { credentials: "same-origin" });
+    const res = await fetch(`/api/by-tmux/${encodeURIComponent(tmuxName)}`, { credentials: "same-origin" });
     if (res.ok) applyComposer(await res.json());
   } catch {
     // The bar keeps its last values; nothing here is worth an error for.
@@ -563,10 +601,10 @@ function applyComposer(s) {
 composerEl.addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const text = sayEl.value.trim();
-  if (!text || !chatFor) return;
+  if (!text) return;
   sayEl.disabled = true;
   try {
-    const res = await fetch(`/api/sessions/${encodeURIComponent(chatFor)}/say`, {
+    const res = await fetch(`/api/sessions/${encodeURIComponent(tmuxName)}/say`, {
       method: "POST",
       credentials: "same-origin",
       headers: { "content-type": "application/json" },
@@ -599,9 +637,8 @@ sayEl.addEventListener("keydown", (ev) => {
 });
 
 stopEl.addEventListener("click", async () => {
-  if (!chatFor) return;
   try {
-    const res = await fetch(`/api/sessions/${encodeURIComponent(chatFor)}/interrupt`, {
+    const res = await fetch(`/api/sessions/${encodeURIComponent(tmuxName)}/interrupt`, {
       method: "POST",
       credentials: "same-origin",
     });
@@ -616,8 +653,8 @@ stopEl.addEventListener("click", async () => {
  *  first shown, so an unused terminal costs no pty and no tmux client. */
 let termStarted = false;
 toggleEl.addEventListener("click", () => {
-  const showTerm = termEl.hidden;
-  termEl.hidden = !showTerm;
+  const showTerm = termwrapEl.hidden;
+  termwrapEl.hidden = !showTerm;
   chatEl.hidden = showTerm;
   composerEl.hidden = showTerm;
   toggleEl.textContent = showTerm ? "conversation" : "terminal";
@@ -627,9 +664,8 @@ toggleEl.addEventListener("click", () => {
   }
 });
 
-function watchChat(sessionId) {
-  if (!sessionId) return;
-  chatFor = sessionId;
+function watchChat() {
+  watchingChat = true;
   cursor = null;
   pollChat();
   setInterval(pollChat, CHAT_POLL_MS);
@@ -638,48 +674,38 @@ function watchChat(sessionId) {
   setInterval(refreshSession, 15_000);
 }
 
-if (tmuxName) {
+if (!tmuxName) {
+  say("no session named — open this page from the board", true);
+} else if (freshName) {
   // Connect first — the terminal is why you are here, and it must not wait on
-  // a lookup. Title and PRs fill in behind it, and a session too new to be in
-  // the registry yet simply keeps the tmux name.
+  // a lookup. Title and PRs fill in behind it.
   titleEl.textContent = tmuxName;
   stateEl.textContent = "live";
-  document.title = `${tmuxName} · claude-board`;
-  // No connect() here any more. The conversation is the default view, and the
-  // terminal only attaches if you ask for it — an unopened terminal costs no
-  // pty and no tmux client.
+  document.title = `${tmuxName} · board`;
   say(`attached to ${tmuxName}`);
   loadSession()
     .then((s) => {
       applyComposer(s);
-      watchAsk(s.sessionId);
-      watchChat(s.sessionId);
-      return loadPrs(s.sessionId);
+      watchAsk();
+      watchChat();
+      return loadPrs();
     })
     // Reported, not swallowed. A silent catch here meant that when the lookup
     // failed the strip was simply empty, with nothing anywhere saying why —
     // which is exactly the state that has to be diagnosed from a screenshot.
     .catch((e) => note(`no PR list: ${e.message ?? e}`));
 } else {
-  // Start reading the conversation IMMEDIATELY. The id is right there in the
-  // URL, so this does not need the session lookup — and that lookup resolves
-  // through the whole listing, about a second cold. Chaining them left the page
-  // empty for that second before it even asked for the messages.
-  watchChat(id);
+  // Start reading the conversation IMMEDIATELY — the tmux name is right there
+  // in the URL, so this does not need the session lookup, which resolves
+  // through the whole listing and is about a second cold. Chaining them left
+  // the page empty for that second before it even asked for the messages.
+  watchChat();
   loadSession()
     .then((s) => {
-      // Always this session's OWN id.
-      //
-      // `inheritedLabel` is a LABEL — `forkOf ?? "its parent"` — for the card's
-      // "forked from X" line, never an id. Passing it here requested
-      // /api/sessions/V2%20pipeline%20E2E/prs and got a 404, so a forked
-      // session showed no PRs and, once the chat copied the same mistake, no
-      // conversation either. The server already merges a parent's PRs into the
-      // fork's own view, so the indirection bought nothing even when it worked.
-      loadPrs(s.sessionId);
+      loadPrs();
       applyComposer(s);
       if (s.attach === "tmux") {
-        watchAsk(s.sessionId);
+        watchAsk();
         say("live — the terminal is one click away");
       } else if (s.attach === "resume") {
         // Not an error any more: you can read the whole conversation here.
