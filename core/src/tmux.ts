@@ -32,9 +32,13 @@ import {
 
 export { execAsync, shellQuote, type Exec, type ExecResult };
 
-/** tmux answers a poll in milliseconds; anything slower means the server is
- *  wedged and the tick should move on rather than stall the UI. */
-const TMUX_TIMEOUT_MS = 2000;
+/** tmux answers a poll in milliseconds on a quiet machine; anything far
+ *  slower means the server is wedged and the tick should move on rather than
+ *  stall the UI. 2000 used to be that ceiling, but a plain `command -v tmux`
+ *  measured 1806ms on a machine running a dozen concurrent Claude Code
+ *  panes — a real, healthy machine, not a wedged server. 5000 gives that
+ *  case headroom while still catching an actually-stuck server. */
+const TMUX_TIMEOUT_MS = 5000;
 
 // ---------------------------------------------------------------------------
 // tmux binary
