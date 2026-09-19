@@ -9,6 +9,7 @@ import {
   clearDraft,
   composerText,
   getOption,
+  getTmuxBin,
   hasSession,
   isClaudeCommand,
   killSession,
@@ -263,6 +264,30 @@ test("listSessions: empty when tmux is missing or no server is running", async (
   resetTmuxBin();
   const { exec } = fakeExec([], false);
   assert.deepEqual(await listSessions(BOX_IDS, exec), []);
+});
+
+test("getTmuxBin: a failed lookup is retried, not cached forever like a success", async () => {
+  resetTmuxBin();
+  // First call times out / fails - e.g. `command -v tmux` missed its budget
+  // under load, which says nothing about whether tmux is installed.
+  const failing: Exec = async () => ({ ok: false, stdout: "", stderr: "" });
+  assert.equal(await getTmuxBin(failing), null);
+
+  // A later call, once the machine is no longer under load, must get a real
+  // answer rather than inheriting the earlier miss forever.
+  const succeeding: Exec = async () => ({ ok: true, stdout: "/opt/homebrew/bin/tmux\n", stderr: "" });
+  assert.equal(await getTmuxBin(succeeding), "/opt/homebrew/bin/tmux");
+
+  // A success, unlike a failure, is permanent: a subsequent failing exec must
+  // not be consulted at all - the cached path answers without shelling out.
+  let calls = 0;
+  const shouldNotRun: Exec = async () => {
+    calls++;
+    return { ok: false, stdout: "", stderr: "" };
+  };
+  assert.equal(await getTmuxBin(shouldNotRun), "/opt/homebrew/bin/tmux");
+  assert.equal(calls, 0, "a cached success must not re-invoke exec");
+  resetTmuxBin();
 });
 
 test("listAllPanes: one `list-panes -a` call for the whole server", async () => {

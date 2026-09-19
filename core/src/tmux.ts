@@ -48,12 +48,24 @@ const TMUX_TIMEOUT_MS = 2000;
 let tmuxBinPromise: Promise<string | null> | undefined;
 
 /** Memoized `command -v tmux`, null when tmux is not installed. Goes through
- *  the same seam as everything else so tests never touch a real PATH. */
+ *  the same seam as everything else so tests never touch a real PATH.
+ *
+ *  A *successful* lookup is cached forever — the binary's path cannot move
+ *  mid-run. A *failed* one is not: `res.ok === false` also covers the 2s
+ *  budget above being missed under load (measured at 1.8s on a machine
+ *  running a dozen concurrent Claude Code panes), which says nothing about
+ *  whether tmux is installed. Caching that verdict permanently used to wedge
+ *  every later poll and every `n`-to-spawn attempt into believing tmux was
+ *  gone for the rest of the process's life. Clearing the promise on failure
+ *  costs one extra `command -v` on the next tick — cheap next to a dashboard
+ *  that never recovers. */
 export function getTmuxBin(execFn: Exec = execAsync): Promise<string | null> {
   if (tmuxBinPromise === undefined) {
-    tmuxBinPromise = execFn("command -v tmux", TMUX_TIMEOUT_MS).then((res) =>
-      res.ok && res.stdout.trim() ? res.stdout.trim() : null,
-    );
+    tmuxBinPromise = execFn("command -v tmux", TMUX_TIMEOUT_MS).then((res) => {
+      const bin = res.ok && res.stdout.trim() ? res.stdout.trim() : null;
+      if (bin === null) tmuxBinPromise = undefined;
+      return bin;
+    });
   }
   return tmuxBinPromise;
 }
